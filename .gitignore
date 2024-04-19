@@ -6,6 +6,7 @@
 .DS_Store
 build/
 install/
+install_*/
 compile_commands.json
 CMakeSettings.json
 *egg-info/

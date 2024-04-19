@@ -11,6 +11,7 @@ cd $build_dir; cmake .. \
 -DCMAKE_C_COMPILER=gcc \
 -DCMAKE_CXX_COMPILER=g++ \
 -DBUILD_SHARED_LIBS=ON \
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
 -DCMAKE_INSTALL_PREFIX=$install_dir
 
 cd $build_dir; make -j$(nproc)
