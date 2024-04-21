@@ -23,7 +23,7 @@ local function gen_clangd(name)
 
     file:write(string.format([[
 If:
-    PathMatch: src/.*
+    PathMatch: [src/.*, source/.*, include/.*]
 CompileFlags:
     Add: [
         -std=c++20,
