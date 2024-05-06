@@ -1,18 +1,30 @@
 #!lua
 
-local home = os.getenv "HOME"
-local slang_home = os.getenv "SLANG_HOME"
-
-
 local includedirs = ""
+local compiler = "gcc"
 
-local function add_includedirs(dir)
-    includedirs = includedirs .. "-I" .. dir .. ",\n"
+local function run_command(command)
+    local handle = io.popen(command, 'r')
+    if handle then
+        local output = handle:read("*a")
+        handle:close() 
+        output = string.sub(output, 1, -2) -- strip("\n")
+        return output
+    else
+        error("Failed to run command => " .. command)
+    end
 end
 
+local function add_includedirs(dir)
+    includedirs = includedirs .. "\t\t-I" .. dir .. ",\n"
+end
+
+local function set_compiler(x)
+    compiler = run_command("realpath " .. x)
+end
 
 local function gen_clangd(name)
-    local name = name or ".clangd"
+    name = name or ".clangd"
     local file, err = io.open(name, "w")
 
     if not file then
@@ -21,19 +33,20 @@ local function gen_clangd(name)
 
     assert(file ~= nil)
 
+    includedirs = string.sub(includedirs, 1, -2) -- strip "\n"
+
     file:write(string.format([[
-If:
-    PathMatch: [src/.*, source/.*, include/.*]
 CompileFlags:
     Add: [
-        -std=c++20,
+        # -D_PSTL_PAR_BACKEND_TBB,
+        # -D_PSTL_PAR_BACKEND_SERIAL,
         -Wno-implicit-function-declaration, -Wno-int-conversion, -ferror-limit=500,
-        -xc++, 
 %s
+        -xc++, 
         -std=c++20
     ]
     Remove: -W*
-    Compiler: gcc
+    Compiler: %s 
 InlayHints:
     BlockEnd: No
     Designators: Yes
@@ -41,21 +54,31 @@ InlayHints:
     ParameterNames: Yes
     DeducedTypes: Yes
 Diagnostics:
-    IgnoreWarnings:
-      - "-Wall"
-      - "-Wextra"
-]], includedirs))
+    Suppress: "*"
+]], includedirs, compiler))
 
     file:close()
 end
 
 
-add_includedirs(home .. "/miniconda/envs/cppenv/include")
+-- 
+-- User settings
+-- 
+local pwd = os.getenv "PWD"
+local home = os.getenv "HOME"
+local slang_home = os.getenv "SLANG_HOME"
+
+set_compiler(run_command("which gcc"))
+
+add_includedirs(home .. "/miniconda3/envs/cppenv/include")
 add_includedirs(home .. "/miniconda3/envs/cppenv/x86_64-conda-linux-gnu/include/c++/13.2.0")
 -- add_includedirs(slang_home .. "/include")
 add_includedirs(slang_home .. "/install/include")
 add_includedirs(slang_home .. "/install/include/parsing")
 
 
+-- 
+-- Generate final ".clangd" file
+-- 
 gen_clangd(".clangd")
 
