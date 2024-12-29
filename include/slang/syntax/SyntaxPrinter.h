@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "slang/parsing/Token.h"
@@ -29,7 +30,7 @@ public:
 
     /// Append raw text to the buffer.
     /// @return a reference to this object, to allow chaining additional method calls.
-    SyntaxPrinter& append(std::string_view text);
+    SyntaxPrinter& append(std::string_view text, std::optional<slang::parsing::TokenKind> kind = std::nullopt);
 
     /// Print the provided @a trivia to the internal buffer.
     /// @return a reference to this object, to allow chaining additional method calls.
@@ -127,6 +128,9 @@ private:
     bool expandMacros = false;
     bool includeComments = true;
     bool squashNewlines = true;
+    bool getLineDirective = false;
+    uint64_t lineDirectiveIdx = 0;
+    uint64_t tokenIdx = 0;
 };
 
 } // namespace slang::syntax
