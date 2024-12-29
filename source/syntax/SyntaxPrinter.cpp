@@ -8,9 +8,13 @@
 #include "slang/syntax/SyntaxPrinter.h"
 
 #include "slang/parsing/ParserMetadata.h"
+#include "slang/parsing/TokenKind.h"
 #include "slang/syntax/SyntaxNode.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/SourceManager.h"
+
+#include <optional>
+#include <string>
 
 namespace slang::syntax {
 
@@ -91,8 +95,9 @@ SyntaxPrinter& SyntaxPrinter::print(Token token) {
     }
 
     if (!excluded && (includeMissing || !token.isMissing()))
-        append(token.rawText());
+        append(token.rawText(), token.kind);
 
+    tokenIdx++;
     return *this;
 }
 
@@ -125,7 +130,25 @@ std::string SyntaxPrinter::printFile(const SyntaxTree& tree) {
         .str();
 }
 
-SyntaxPrinter& SyntaxPrinter::append(std::string_view text) {
+SyntaxPrinter& SyntaxPrinter::append(std::string_view text, std::optional<slang::parsing::TokenKind> kind) {
+    std::string kindStr = "Unknown";
+    if(kind != std::nullopt) {
+        kindStr = toString(*kind);
+    }
+
+    if(kind == TokenKind::Directive && text == "`__LINE__") {
+        getLineDirective = true;
+        lineDirectiveIdx = tokenIdx;
+    }
+
+    if (kind == TokenKind::IntegerLiteral) {
+        if(getLineDirective && lineDirectiveIdx == (tokenIdx - 1)) {
+            fflush(stdout);
+            return *this;
+        }
+        getLineDirective = false;
+    }
+
     if (!squashNewlines) {
         buffer.append(text);
         return *this;
