@@ -1017,7 +1017,11 @@ void Driver::printWarning(const std::string& message) {
 }
 
 bool Driver::Options::lintMode() const {
-    return compilationFlags.at(CompilationFlags::LintMode) == true;
+    auto it = compilationFlags.find(CompilationFlags::LintMode);
+    if (it != compilationFlags.end() && it->second.has_value()) {
+        return it->second.value() == true;
+    }
+    return false;
 }
 
 } // namespace slang::driver
