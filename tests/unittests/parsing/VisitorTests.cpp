@@ -4,6 +4,7 @@
 #include "Test.h"
 #include <fmt/core.h>
 
+#include "slang/analysis/AnalysisManager.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/parsing/ParserMetadata.h"
 #include "slang/syntax/SyntaxPrinter.h"
@@ -747,5 +748,11 @@ TEST_CASE("Visit all file") {
         v.visitDefault(elem);
     }));
 
-    CHECK(count == 1487);
+    CHECK(count == 1814);
+
+    compilation.getAllDiagnostics();
+    compilation.freeze();
+
+    analysis::AnalysisManager analysisManager;
+    analysisManager.analyze(compilation);
 }

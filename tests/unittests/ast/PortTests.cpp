@@ -155,7 +155,7 @@ module m6(I.bar bar); endmodule
     checkIfacePort("m0", "a", "I", "");
     checkIfacePort("m0", "b", "I", "");
     checkWirePort("m0", "c", In, wire, "logic");
-    checkWirePort("m1", "j", InOut, wire, "struct{logic f;}J");
+    checkWirePort("m1", "j", InOut, wire, "J");
     checkIfacePort("m3", "k", "K", "");
     checkWirePort("m3", "w", InOut, wire, "logic");
     checkWirePort("m4", "v", Out, nullptr, "logic");
@@ -651,10 +651,7 @@ module top;
 endmodule
 )");
 
-    CompilationOptions options;
-    options.flags |= CompilationFlags::DisableInstanceCaching;
-
-    Compilation compilation(options);
+    Compilation compilation;
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
@@ -730,7 +727,7 @@ interface A_Bus( input logic clk );
         input gnt;
         output req, addr;
         inout data;
-        property p1; gnt ##[1:3] data; endproperty
+        property p1; gnt ##[1:3] data > 0; endproperty
     endclocking
 
     modport DUT ( input clk, req, addr,
@@ -1714,36 +1711,6 @@ interface I(.;input interface I
 
     // No crash.
     compilation.getAllDiagnostics();
-}
-
-TEST_CASE("Inout ports are treated as readers and writers") {
-    auto tree = SyntaxTree::fromText(R"(
-interface I;
-    wire integer i;
-    modport m(inout i);
-endinterface
-
-module m(inout wire a);
-    wire local_a;
-    pullup(local_a);
-    tranif1(a, local_a, 1'b1);
-endmodule
-
-module top;
-    I i();
-
-    wire a;
-    m m1(.*);
-    m m2(.*);
-endmodule
-)");
-
-    CompilationOptions options;
-    options.flags &= ~CompilationFlags::SuppressUnused;
-
-    Compilation compilation(options);
-    compilation.addSyntaxTree(tree);
-    NO_COMPILATION_ERRORS;
 }
 
 TEST_CASE("Ansi duplicate port compatibility option") {

@@ -13,7 +13,7 @@
 #include "slang/ast/SemanticFacts.h"
 #include "slang/ast/Symbol.h"
 #include "slang/diagnostics/Diagnostics.h"
-#include "slang/util/Hash.h"
+#include "slang/util/FlatMap.h"
 #include "slang/util/Iterator.h"
 #include "slang/util/Util.h"
 
@@ -67,6 +67,10 @@ public:
     /// Gets the instance body that contains this scope, if applicable.
     /// Otherwise returns nullptr.
     const InstanceBodySymbol* getContainingInstance() const;
+
+    /// Gets the instance body or checker body that contains this scope, if applicable.
+    /// Otherwise returns nullptr.
+    const Symbol* getContainingInstanceOrChecker() const;
 
     /// Gets the compilation unit that contains this scope, if applicable.
     /// Otherwise returns nullptr.
@@ -266,7 +270,8 @@ protected:
     /// Add a preconstructed wildcard import to this scope.
     void addWildcardImport(const WildcardImportSymbol& item);
 
-    void addDeferredMembers(const syntax::SyntaxNode& syntax);
+    void setHasBinds() { getOrAddDeferredData().hasBinds = true; }
+
     void insertMember(const Symbol* member, const Symbol* at, bool isElaborating,
                       bool incrementIndex) const;
 
@@ -303,11 +308,19 @@ private:
         std::vector<std::pair<const syntax::SyntaxNode*, const Symbol*>> portDecls;
 
     public:
-        // A flag indicating whether any enums have been registered in the scope.
+        // Indicates whether any enums have been registered in the scope.
         bool hasEnums = false;
+
+        // Indicates whether there are any bind directives targeting this scope.
+        bool hasBinds = false;
+
+        // Indicates whether this scope is uncacheable, for instance if
+        // it contains an extern iface method implementation.
+        bool isUncacheable = false;
     };
 
     DeferredMemberData& getOrAddDeferredData() const;
+    void addDeferredMembers(const syntax::SyntaxNode& syntax);
     void elaborate() const;
     void handleNameConflict(const Symbol& member) const;
     void handleNameConflict(const Symbol& member, const Symbol*& existing,

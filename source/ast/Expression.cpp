@@ -138,12 +138,12 @@ struct Expression::PropagationVisitor {
     const Type& newType;
     const Expression* parentExpr;
     SourceRange opRange;
-    bool isAssignment;
+    ConversionKind conversionKind;
 
     PropagationVisitor(const ASTContext& context, const Type& newType, const Expression* parentExpr,
-                       SourceRange opRange, bool isAssignment) :
+                       SourceRange opRange, ConversionKind conversionKind) :
         context(context), newType(newType), parentExpr(parentExpr), opRange(opRange),
-        isAssignment(isAssignment) {}
+        conversionKind(conversionKind) {}
 
     template<typename T>
     Expression& visit(T& expr) {
@@ -160,7 +160,7 @@ struct Expression::PropagationVisitor {
         // check if the conversion should be pushed further down the tree. Otherwise we
         // should insert the implicit conversion here.
         bool needConversion = !newType.isEquivalent(*expr.type);
-        if constexpr (requires { expr.propagateType(context, newType, opRange); }) {
+        if constexpr (requires { expr.propagateType(context, newType, opRange, conversionKind); }) {
             if ((newType.isFloating() && expr.type->isFloating()) ||
                 (newType.isIntegral() && expr.type->isIntegral()) || newType.isString() ||
                 expr.kind == ExpressionKind::ValueRange) {
@@ -173,25 +173,19 @@ struct Expression::PropagationVisitor {
                     // most immediate parent expression instead.
                     updateRange(expr);
                 }
-                else if (expr.kind == ExpressionKind::ConditionalOp && isAssignment) {
-                    // This is a special case to make sure we get a width expansion
-                    // warning for assignments from a conditional operator. The type
-                    // conversion here is a propagation so no implicit conversion
-                    // actually gets created, so we need to invoke it manually.
-                    ConversionExpression::checkImplicitConversions(context, *expr.type, newType,
-                                                                   expr, parentExpr, opRange,
-                                                                   ConversionKind::Implicit);
-                }
 
-                if (expr.propagateType(context, newType, opRange))
+                if (expr.propagateType(context, newType, opRange, conversionKind)) {
+                    // We propagated the type successfully so we don't need a conversion.
+                    // We should however clear out any constant value that may have been
+                    // stored here, since it may no longer be valid given the new type.
                     needConversion = false;
+                    expr.constant = nullptr;
+                }
             }
         }
 
         Expression* result = &expr;
         if (needConversion) {
-            auto conversionKind = isAssignment ? ConversionKind::Implicit
-                                               : ConversionKind::Propagated;
             result = &ConversionExpression::makeImplicit(context, newType, conversionKind, expr,
                                                          parentExpr, opRange);
         }
@@ -1381,6 +1375,9 @@ Expression* Expression::tryBindInterfaceRef(const ASTContext& context,
 
     // If we found an interface port we should unwrap to what it's connected to.
     if (symbol->kind == SymbolKind::InterfacePort) {
+        result.flags |= LookupResultFlags::IfacePort;
+        result.path.emplace_back(*symbol);
+
         ifacePort = &symbol->as<InterfacePortSymbol>();
         std::tie(symbol, modport) = ifacePort->getConnection();
 
@@ -1453,20 +1450,22 @@ Expression* Expression::tryBindInterfaceRef(const ASTContext& context,
         iface = &symbol->as<InstanceSymbol>().body;
     }
 
-    if (iface->hierarchyOverrideNode) {
-        auto& diag = context.addDiag(diag::VirtualIfaceDefparam, sourceRange);
-        if (auto source = findOverrideNodeSource(*iface->hierarchyOverrideNode))
-            diag.addNote(diag::NoteDeclarationHere, source->sourceRange());
-    }
+    if (!isInterfacePort) {
+        if (iface->hierarchyOverrideNode) {
+            auto& diag = context.addDiag(diag::VirtualIfaceDefparam, sourceRange);
+            if (auto source = findOverrideNodeSource(*iface->hierarchyOverrideNode))
+                diag.addNote(diag::NoteDeclarationHere, source->sourceRange());
+        }
 
-    if (iface->parentInstance && iface->parentInstance->resolvedConfig) {
-        auto& diag = context.addDiag(diag::VirtualIfaceConfigRule, sourceRange);
+        if (iface->parentInstance && iface->parentInstance->resolvedConfig) {
+            auto& diag = context.addDiag(diag::VirtualIfaceConfigRule, sourceRange);
 
-        auto rc = iface->parentInstance->resolvedConfig;
-        if (rc->configRule)
-            diag.addNote(diag::NoteConfigRule, rc->configRule->syntax->sourceRange());
-        else
-            diag.addNote(diag::NoteConfigRule, rc->useConfig.location);
+            auto rc = iface->parentInstance->resolvedConfig;
+            if (rc->configRule)
+                diag.addNote(diag::NoteConfigRule, rc->configRule->syntax->sourceRange());
+            else
+                diag.addNote(diag::NoteConfigRule, rc->useConfig.location);
+        }
     }
 
     if (!arrayModportName.empty()) {
@@ -1549,14 +1548,14 @@ void Expression::findPotentiallyImplicitNets(
 
 void Expression::contextDetermined(const ASTContext& context, Expression*& expr,
                                    const Expression* parentExpr, const Type& newType,
-                                   SourceRange opRange, bool isAssignment) {
-    PropagationVisitor visitor(context, newType, parentExpr, opRange, isAssignment);
+                                   SourceRange opRange, ConversionKind conversionKind) {
+    PropagationVisitor visitor(context, newType, parentExpr, opRange, conversionKind);
     expr = &expr->visit(visitor);
 }
 
 void Expression::selfDetermined(const ASTContext& context, Expression*& expr) {
     SLANG_ASSERT(expr->type);
-    PropagationVisitor visitor(context, *expr->type, nullptr, {}, false);
+    PropagationVisitor visitor(context, *expr->type, nullptr, {}, ConversionKind::Propagated);
     expr = &expr->visit(visitor);
 }
 

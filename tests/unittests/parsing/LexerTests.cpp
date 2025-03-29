@@ -156,8 +156,9 @@ TEST_CASE("Embedded control characters in a broken UTF8 comment not affecting le
     options.maxErrors = 4;
 
     diagnostics.clear();
-    auto buffer = getSourceManager().assignText(text);
-    Lexer lexer(buffer, alloc, diagnostics, options);
+    auto& sm = getSourceManager();
+    auto buffer = sm.assignText(text);
+    Lexer lexer(buffer, alloc, diagnostics, sm, options);
     Token token = lexer.lex();
 
     CHECK(token.kind == TokenKind::EndModuleKeyword);
@@ -790,8 +791,9 @@ TEST_CASE("Too many errors") {
     options.maxErrors = 9;
 
     diagnostics.clear();
-    auto buffer = getSourceManager().assignText(std::string_view(buf.data(), buf.size()));
-    Lexer lexer(buffer, alloc, diagnostics, options);
+    auto& sm = getSourceManager();
+    auto buffer = sm.assignText(std::string_view(buf.data(), buf.size()));
+    Lexer lexer(buffer, alloc, diagnostics, sm, options);
 
     for (size_t i = 0; i < buf.size() - 1; i++)
         CHECK(lexer.lex().kind == TokenKind::Unknown);
@@ -1160,8 +1162,9 @@ void testDirectivePunctuation(TokenKind kind) {
     std::string_view text = LF::getTokenKindText(kind);
 
     diagnostics.clear();
-    auto buffer = getSourceManager().assignText(text);
-    Lexer lexer(buffer, alloc, diagnostics);
+    auto& sm = getSourceManager();
+    auto buffer = sm.assignText(text);
+    Lexer lexer(buffer, alloc, diagnostics, sm);
 
     Token token = lexer.lex();
 
@@ -1281,37 +1284,48 @@ TEST_CASE("Hex escape corner case") {
 
 TEST_CASE("Compat translate_on/off pragmas") {
     LexerOptions options;
-    options.enableTranslateOnOffCompat = true;
+    options.commentHandlers["pragma"]["synthesis_off"] = {CommentHandler::TranslateOff,
+                                                          "synthesis_on"};
+    options.commentHandlers["synthesis"]["translate_off"] = {CommentHandler::TranslateOff,
+                                                             "translate_on"};
 
-    auto buffer = getSourceManager().assignText(R"(
+    auto& sm = getSourceManager();
+    auto buffer = sm.assignText(R"(
 a
 // pragma synthesis_off
 b
 // pragma synthesis_on
 c
-// synthesis translate_off
+/* synthesis translate_off */
 d
 // synthesis translate_off
 e
-// synthesis translate_on
+/* synthesis translate_on */
 f
 )"sv);
+
     diagnostics.clear();
-    Lexer lexer(buffer, alloc, diagnostics, options);
-    CHECK(diagnostics.empty());
+    Lexer lexer(buffer, alloc, diagnostics, sm, options);
+
     for (auto& text : {"a"sv, "c"sv, "f"sv}) {
         Token tok = lexer.lex();
         REQUIRE(tok.kind == TokenKind::Identifier);
         CHECK(!tok.rawText().compare(text));
     }
+
     CHECK(lexer.lex().kind == TokenKind::EndOfFile);
+    CHECK(diagnostics.empty());
 }
 
 TEST_CASE("Compat translate_on/off pragmas unclosed") {
     LexerOptions options;
-    options.enableTranslateOnOffCompat = true;
+    options.commentHandlers["pragma"]["synthesis_off"] = {CommentHandler::TranslateOff,
+                                                          "synthesis_on"};
+    options.commentHandlers["synthesis"]["translate_off"] = {CommentHandler::TranslateOff,
+                                                             "translate_on"};
 
-    auto buffer = getSourceManager().assignText(R"(
+    auto& sm = getSourceManager();
+    auto buffer = sm.assignText(R"(
 a
 // pragma synthesis_off
 b
@@ -1322,14 +1336,17 @@ d
 e
 f
 )"sv);
+
     diagnostics.clear();
-    Lexer lexer(buffer, alloc, diagnostics, options);
+    Lexer lexer(buffer, alloc, diagnostics, sm, options);
     for (auto& text : {"a"sv, "c"sv}) {
         Token tok = lexer.lex();
         REQUIRE(tok.kind == TokenKind::Identifier);
         CHECK(!tok.rawText().compare(text));
     }
+
     CHECK(lexer.lex().kind == TokenKind::EndOfFile);
+
     REQUIRE(diagnostics.size() == 1);
     CHECK(diagnostics[0].code == diag::UnclosedTranslateOff);
 }

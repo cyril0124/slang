@@ -218,7 +218,7 @@ endpackage
     CHECK(root.lookupName<NetSymbol>("m.a").getType().toString() == "logic[3:0]");
     CHECK(root.lookupName<NetSymbol>("m.b").netType.name == "bar");
     CHECK(root.lookupName<NetSymbol>("m.b").getType().toString() == "logic[3:0]");
-    CHECK(root.lookupName<NetSymbol>("m.c").getType().toString() == "logic[10:0]");
+    CHECK(root.lookupName<NetSymbol>("m.c").getType().toString() == "m.stuff");
     CHECK(root.lookupName<NetSymbol>("m.e").getType().toString() == "logic[3:0]$[0:4]");
 }
 
@@ -985,7 +985,10 @@ module my_checker;
     wire [1:0] req;
     wire [1:0] vld;
     logic ovr;
-    if (valid_arb(.request(req), .valid(vld), .override(ovr))) begin
+
+    always_comb begin
+        if (valid_arb(.request(req), .valid(vld), .override(ovr))) begin
+        end
     end
 endmodule
 )");
@@ -1052,7 +1055,7 @@ endmodule
 
     auto& foo = compilation.getRoot()
                     .lookupName<GenerateBlockArraySymbol>("top.m1[2][1][3].asdf")
-                    .memberAt<GenerateBlockSymbol>(1)
+                    .memberAt<GenerateBlockSymbol>(2)
                     .memberAt<GenerateBlockSymbol>(1)
                     .find<VariableSymbol>("foo");
 
@@ -1493,10 +1496,7 @@ module n(I i);
 endmodule
 )");
 
-    CompilationOptions options;
-    options.flags |= CompilationFlags::DisableInstanceCaching;
-
-    Compilation compilation(options);
+    Compilation compilation;
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();

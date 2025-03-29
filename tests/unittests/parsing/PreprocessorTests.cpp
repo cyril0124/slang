@@ -126,8 +126,9 @@ void testDirective(SyntaxKind kind) {
     std::string_view text = LexerFacts::getDirectiveText(kind);
 
     diagnostics.clear();
-    auto buffer = getSourceManager().assignText(text);
-    Lexer lexer(buffer, alloc, diagnostics);
+    auto& sm = getSourceManager();
+    auto buffer = sm.assignText(text);
+    Lexer lexer(buffer, alloc, diagnostics, sm);
 
     Token token = lexer.lex();
     REQUIRE(token);
@@ -760,7 +761,7 @@ TEST_CASE("Macro arg location bug") {
     CHECK(result == R"(
 source:4:15: error: unknown macro or compiler directive '`bar'
    `FOO(      `bar      )   asdfasdfasdfasdfasdfasdfsadfasdfasdfasdfasdf
-              ^
+              ^~~~
 )");
 }
 
@@ -2675,6 +2676,7 @@ endmodule
 
     LexerOptions lo;
     lo.enableLegacyProtect = true;
+    lo.commentHandlers["pragma"]["protect"] = {CommentHandler::Protect};
 
     std::string result = preprocess(text, lo);
     CHECK(result == expected);

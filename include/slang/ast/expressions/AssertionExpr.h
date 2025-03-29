@@ -179,6 +179,10 @@ public:
     /// Computes possible clock ticks (delay) length of sequence under assertion expression.
     std::optional<SequenceRange> computeSequenceLength() const;
 
+    /// Returns true if this expression is known to be within a pair of parentheses,
+    /// and otherwise false.
+    bool isParenthesized() const;
+
     static const AssertionExpr& bind(const syntax::SequenceExprSyntax& syntax,
                                      const ASTContext& context, bool allowDisable = false);
 
@@ -339,6 +343,9 @@ public:
         /// A delay that applies to the element.
         SequenceRange delay;
 
+        /// An optional source range for the delay syntax.
+        SourceRange delayRange;
+
         /// The element expression.
         not_null<const AssertionExpr*> sequence;
     };
@@ -451,9 +458,13 @@ public:
     /// The right operand.
     const AssertionExpr& right;
 
+    /// The source range of the operator token.
+    SourceRange opRange;
+
     BinaryAssertionExpr(BinaryAssertionOperator op, const AssertionExpr& left,
-                        const AssertionExpr& right) :
-        AssertionExpr(AssertionExprKind::Binary), op(op), left(left), right(right) {}
+                        const AssertionExpr& right, SourceRange opRange) :
+        AssertionExpr(AssertionExprKind::Binary), op(op), left(left), right(right),
+        opRange(opRange) {}
 
     void requireSequence(const ASTContext& context, DiagCode code) const;
 

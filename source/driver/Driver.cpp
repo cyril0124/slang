@@ -8,9 +8,10 @@
 //------------------------------------------------------------------------------
 #include "slang/driver/Driver.h"
 
+#include <BS_thread_pool.hpp>
 #include <fmt/color.h>
 
-#include "slang/ast/Compilation.h"
+#include "slang/analysis/AnalysisManager.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
@@ -28,7 +29,6 @@
 #include "slang/text/Json.h"
 #include "slang/util/Random.h"
 #include "slang/util/String.h"
-#include "slang/util/ThreadPool.h"
 
 namespace fs = std::filesystem;
 
@@ -39,9 +39,6 @@ using namespace parsing;
 using namespace syntax;
 
 Driver::Driver() : diagEngine(sourceManager), sourceLoader(sourceManager) {
-    // Construct a compilation object here before the TextDiagnosticClient
-    // to ensure that static formatter callbacks are registered.
-    Compilation compilation;
     textDiagClient = std::make_shared<TextDiagnosticClient>();
     diagEngine.addClient(textDiagClient);
 }
@@ -90,6 +87,12 @@ void Driver::addStandardArgs() {
     cmdLine.add("--enable-legacy-protect", options.enableLegacyProtect,
                 "If true, the preprocessor will support legacy protected envelope directives, "
                 "for compatibility with old Verilog tools");
+    cmdLine.add("--translate-off-format", options.translateOffOptions,
+                "Set a format for comment directives that mark a region of disabled "
+                "source text. The format is a common keyword, a start word, and an "
+                "end word, each separated by commas. For example, "
+                "'pragma,translate_off,translate_on'",
+                "<common>,<start>,<end>");
 
     // Legacy vendor commands support
     cmdLine.add(
@@ -158,9 +161,8 @@ void Driver::addStandardArgs() {
                 "Default time scale to use for design elements that don't specify one explicitly",
                 "<base>/<precision>");
 
-    auto addCompFlag = [&](CompilationFlags flag, std::string_view name, std::string_view desc,
-                           std::optional<bool> defVal = std::nullopt) {
-        auto [it, inserted] = options.compilationFlags.emplace(flag, defVal);
+    auto addCompFlag = [&](CompilationFlags flag, std::string_view name, std::string_view desc) {
+        auto [it, inserted] = options.compilationFlags.emplace(flag, std::nullopt);
         SLANG_ASSERT(inserted);
         cmdLine.add(name, it->second, desc);
     };
@@ -201,8 +203,7 @@ void Driver::addStandardArgs() {
                 "Only perform linting of code, don't try to elaborate a full hierarchy");
     addCompFlag(CompilationFlags::DisableInstanceCaching, "--disable-instance-caching",
                 "Disable the use of instance caching, which normally allows skipping duplicate "
-                "instance bodies to save time when elaborating",
-                true);
+                "instance bodies to save time when elaborating");
 
     cmdLine.add("--top", options.topModules,
                 "One or more top-level modules to instantiate "
@@ -233,6 +234,8 @@ void Driver::addStandardArgs() {
                 "Show include stacks in diagnostic output");
     cmdLine.add("--diag-macro-expansion", options.diagMacroExpansion,
                 "Show macro expansion backtraces in diagnostic output");
+    cmdLine.add("--diag-abs-paths", options.diagAbsPaths,
+                "Display absolute paths to files in diagnostic output");
     cmdLine.add("--diag-hierarchy", options.diagHierarchy,
                 "Show hierarchy locations in diagnostic output", "always|never|auto");
     cmdLine.add("--diag-json", options.diagJson,
@@ -351,6 +354,15 @@ void Driver::addStandardArgs() {
         "One or more command files containing additional program options. "
         "Paths in the file are considered relative to the file itself.",
         "<file-pattern>[,...]", CommandLineFlags::CommaList);
+
+    // Analysis modifiers
+    cmdLine.add("--dfa-unique-priority", options.dfaUniquePriority,
+                "Respect the 'unique' and 'priority' keywords when analyzing data flow "
+                "through case statements");
+
+    cmdLine.add("--dfa-four-state", options.dfaFourState,
+                "Require that case items cover X and Z bits to assume full coverage "
+                "in data flow analysis");
 }
 
 [[nodiscard]] bool Driver::parseCommandLine(std::string_view argList,
@@ -504,6 +516,36 @@ bool Driver::processOptions() {
             opt = true;
     }
 
+    if (!options.translateOffOptions.empty()) {
+        bool anyBad = false;
+        for (auto& fmtStr : options.translateOffOptions) {
+            bool bad = false;
+            auto parts = splitString(fmtStr, ',');
+            if (parts.size() != 3)
+                bad = true;
+
+            for (auto part : parts) {
+                if (part.empty())
+                    bad = true;
+
+                for (char c : part) {
+                    if (!isAlphaNumeric(c) && c != '_')
+                        bad = true;
+                }
+            }
+
+            if (bad)
+                printError(fmt::format("invalid format for translate-off-format: '{}'", fmtStr));
+            else
+                translateOffFormats.emplace_back(parts[0], parts[1], parts[2]);
+
+            anyBad |= bad;
+        }
+
+        if (anyBad)
+            return false;
+    }
+
     if (!reportLoadErrors())
         return false;
 
@@ -518,6 +560,7 @@ bool Driver::processOptions() {
         jsonWriter->startArray();
 
         jsonDiagClient = std::make_shared<JsonDiagnosticClient>(*jsonWriter);
+        jsonDiagClient->showAbsPaths(options.diagAbsPaths.value_or(false));
         diagEngine.addClient(jsonDiagClient);
     }
 
@@ -529,6 +572,7 @@ bool Driver::processOptions() {
     tdc.showOptionName(options.diagOptionName.value_or(true));
     tdc.showIncludeStack(options.diagIncludeStack.value_or(true));
     tdc.showMacroExpansion(options.diagMacroExpansion.value_or(true));
+    tdc.showAbsPaths(options.diagAbsPaths.value_or(false));
 
     if (options.diagHierarchy == "always")
         tdc.showHierarchyInstance(ShowHierarchyPathOption::Always);
@@ -735,6 +779,17 @@ void Driver::addParseOptions(Bag& bag) const {
     if (options.maxLexerErrors.has_value())
         loptions.maxErrors = *options.maxLexerErrors;
 
+    if (loptions.enableLegacyProtect)
+        loptions.commentHandlers["pragma"]["protect"] = {CommentHandler::Protect};
+
+    for (auto& [common, start, end] : translateOffFormats)
+        loptions.commentHandlers[common][start] = {CommentHandler::TranslateOff, end};
+
+    loptions.commentHandlers["slang"]["lint_off"] = {CommentHandler::LintOff};
+    loptions.commentHandlers["slang"]["lint_on"] = {CommentHandler::LintOn};
+    loptions.commentHandlers["slang"]["lint_save"] = {CommentHandler::LintSave};
+    loptions.commentHandlers["slang"]["lint_restore"] = {CommentHandler::LintRestore};
+
     ParserOptions poptions;
     poptions.languageVersion = languageVersion;
     if (options.maxParseDepth.has_value())
@@ -771,9 +826,6 @@ void Driver::addCompilationOptions(Bag& bag) const {
         if (value == true)
             coptions.flags |= flag;
     }
-
-    if (options.lintMode())
-        coptions.flags |= CompilationFlags::SuppressUnused;
 
     for (auto& name : options.topModules)
         coptions.topModules.emplace(name);
@@ -831,7 +883,7 @@ bool Driver::reportParseDiags() {
     return diagEngine.getNumErrors() == 0;
 }
 
-bool Driver::reportCompilation(Compilation& compilation, bool quiet) {
+void Driver::reportCompilation(Compilation& compilation, bool quiet) {
     if (!quiet) {
         auto topInstances = compilation.getRoot().topInstances;
         if (!topInstances.empty()) {
@@ -844,7 +896,31 @@ bool Driver::reportCompilation(Compilation& compilation, bool quiet) {
 
     for (auto& diag : compilation.getAllDiagnostics())
         diagEngine.issue(diag);
+}
 
+void Driver::runAnalysis(ast::Compilation& compilation) {
+    using namespace slang::analysis;
+
+    compilation.getAllDiagnostics();
+    compilation.freeze();
+
+    AnalysisOptions ao;
+    ao.numThreads = options.numThreads.value_or(0);
+    if (!options.lintMode())
+        ao.flags |= AnalysisFlags::CheckUnused;
+    if (options.dfaUniquePriority.value_or(true))
+        ao.flags |= AnalysisFlags::FullCaseUniquePriority;
+    if (options.dfaFourState.value_or(false))
+        ao.flags |= AnalysisFlags::FullCaseFourState;
+
+    AnalysisManager analysisManager(ao);
+    analysisManager.analyze(compilation);
+
+    for (auto& diag : analysisManager.getDiagnostics(compilation.getSourceManager()))
+        diagEngine.issue(diag);
+}
+
+bool Driver::reportDiagnostics(bool quiet) {
     bool hasDiagsStdout = false;
     bool succeeded = diagEngine.getNumErrors() == 0;
 
@@ -882,6 +958,13 @@ bool Driver::reportCompilation(Compilation& compilation, bool quiet) {
     }
 
     return succeeded;
+}
+
+bool Driver::runFullCompilation(bool quiet) {
+    auto compilation = createCompilation();
+    reportCompilation(*compilation, quiet);
+    runAnalysis(*compilation);
+    return reportDiagnostics(quiet);
 }
 
 bool Driver::parseUnitListing(std::string_view text) {

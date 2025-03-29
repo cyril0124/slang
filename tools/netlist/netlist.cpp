@@ -40,14 +40,14 @@ public:
     constexpr auto format(NetlistNode const& node, Context& ctx) const {
         if (node.kind == NodeKind::VariableAlias) {
             auto& aliasNode = node.as<NetlistVariableAlias>();
-            return format_to(ctx.out(), "{}{}", aliasNode.hierarchicalPath, aliasNode.overlap);
+            return fmt::format_to(ctx.out(), "{}{}", aliasNode.hierarchicalPath, aliasNode.overlap);
         }
         else if (node.kind == NodeKind::VariableDeclaration) {
             auto& declNode = node.as<NetlistVariableDeclaration>();
-            return format_to(ctx.out(), "{}", declNode.hierarchicalPath);
+            return fmt::format_to(ctx.out(), "{}", declNode.hierarchicalPath);
         }
         else {
-            return format_to(ctx.out(), "{}", node.getName());
+            return fmt::format_to(ctx.out(), "{}", node.getName());
         }
     }
 };
@@ -273,7 +273,8 @@ int main(int argc, char** argv) {
         bool ok = driver.parseAllSources();
 
         auto compilation = driver.createCompilation();
-        ok &= driver.reportCompilation(*compilation, *quiet);
+        driver.reportCompilation(*compilation, *quiet);
+        ok &= driver.reportDiagnostics(*quiet);
 
         if (!ok) {
             return ok;
@@ -355,9 +356,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     SLANG_CATCH(const std::exception& e) {
-#if __cpp_exceptions
-        OS::printE(fmt::format("{}\n", e.what()));
-#endif
+        SLANG_REPORT_EXCEPTION(e, "{}\n");
         return 1;
     }
 

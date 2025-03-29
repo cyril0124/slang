@@ -24,19 +24,6 @@ static_assert(std::numeric_limits<double>::is_iec559, "SystemVerilog requires IE
 
 static const double BitsPerDecimal = log2(10.0);
 
-static constexpr std::string_view PragmaBeginProtected = "pragma protect begin_protected"sv;
-static constexpr std::string_view PragmaEndProtected = "pragma protect end_protected"sv;
-
-// Note the detection algorithm requires these in alphabetical order; also when a prefix is
-// followed by a whitespace in one variant, it's assumed the same prefix will be followed by
-// a whitespace in all variants
-static std::vector<std::string_view> TranslateOffPragmas = {
-    "pragma synthesis_off"sv,   "pragma translate_off"sv,    "synopsys synthesis_off"sv,
-    "synopsys translate_off"sv, "synthesis translate_off"sv, "xilinx translate_off"sv};
-static std::vector<std::string_view> TranslateOnPragmas = {
-    "pragma synthesis_on"sv,   "pragma translate_on"sv,    "synopsys synthesis_on"sv,
-    "synopsys translate_on"sv, "synthesis translate_on"sv, "xilinx translate_on"sv};
-
 namespace slang::parsing {
 
 using namespace syntax;
@@ -44,16 +31,18 @@ using namespace syntax;
 using LF = LexerFacts;
 
 Lexer::Lexer(SourceBuffer buffer, BumpAllocator& alloc, Diagnostics& diagnostics,
-             LexerOptions options) :
-    Lexer(buffer.id, buffer.data, buffer.data.data(), alloc, diagnostics, options) {
+             SourceManager& sourceManager, LexerOptions options) :
+    Lexer(buffer.id, buffer.data, buffer.data.data(), alloc, diagnostics, sourceManager,
+          std::move(options)) {
     library = buffer.library;
 }
 
 Lexer::Lexer(BufferID bufferId, std::string_view source, const char* startPtr, BumpAllocator& alloc,
-             Diagnostics& diagnostics, LexerOptions options) :
-    alloc(alloc), diagnostics(diagnostics), options(options), bufferId(bufferId),
+             Diagnostics& diagnostics, SourceManager& sourceManager, LexerOptions options) :
+    alloc(alloc), diagnostics(diagnostics), options(std::move(options)), bufferId(bufferId),
     originalBegin(source.data()), sourceBuffer(startPtr),
-    sourceEnd(source.data() + source.length()), marker(nullptr) {
+    sourceEnd(source.data() + source.length()), marker(nullptr), sourceManager(sourceManager) {
+
     ptrdiff_t count = sourceEnd - sourceBuffer;
     SLANG_ASSERT(count);
     SLANG_ASSERT(sourceEnd[-1] == '\0');
@@ -74,7 +63,8 @@ Lexer::Lexer(BufferID bufferId, std::string_view source, const char* startPtr, B
     }
 }
 
-Token Lexer::concatenateTokens(BumpAllocator& alloc, Token left, Token right) {
+Token Lexer::concatenateTokens(BumpAllocator& alloc, SourceManager& sourceManager, Token left,
+                               Token right) {
     auto location = left.location();
     auto trivia = left.trivia();
 
@@ -94,8 +84,13 @@ Token Lexer::concatenateTokens(BumpAllocator& alloc, Token left, Token right) {
     std::string_view combined{mem, newLength};
 
     Diagnostics unused;
-    Lexer lexer{
-        BufferID::getPlaceholder(), combined, combined.data(), alloc, unused, LexerOptions{}};
+    Lexer lexer{BufferID::getPlaceholder(),
+                combined,
+                combined.data(),
+                alloc,
+                unused,
+                sourceManager,
+                LexerOptions{}};
 
     auto token = lexer.lex();
     if (token.kind == TokenKind::Unknown || token.rawText().empty())
@@ -175,7 +170,8 @@ Token Lexer::stringify(Lexer& parentLexer, Token startToken, std::span<Token> bo
 
     Diagnostics unused;
     Lexer lexer{BufferID::getPlaceholder(), raw,    raw.data(),
-                parentLexer.alloc,          unused, parentLexer.options};
+                parentLexer.alloc,          unused, parentLexer.sourceManager,
+                parentLexer.options};
 
     auto token = lexer.lex();
     SLANG_ASSERT(token.kind == TokenKind::StringLiteral);
@@ -185,7 +181,8 @@ Token Lexer::stringify(Lexer& parentLexer, Token startToken, std::span<Token> bo
                        startToken.location());
 }
 
-Trivia Lexer::commentify(BumpAllocator& alloc, std::span<Token> tokens) {
+Trivia Lexer::commentify(BumpAllocator& alloc, SourceManager& sourceManager,
+                         std::span<Token> tokens) {
     SmallVector<char> text;
     for (auto cur : tokens) {
         for (const Trivia& t : cur.trivia())
@@ -199,7 +196,8 @@ Trivia Lexer::commentify(BumpAllocator& alloc, std::span<Token> tokens) {
     std::string_view raw = toStringView(text.copy(alloc));
 
     Diagnostics unused;
-    Lexer lexer{BufferID::getPlaceholder(), raw, raw.data(), alloc, unused, LexerOptions{}};
+    Lexer lexer{
+        BufferID::getPlaceholder(), raw, raw.data(), alloc, unused, sourceManager, LexerOptions{}};
 
     auto token = lexer.lex();
     SLANG_ASSERT(token.kind == TokenKind::EndOfFile);
@@ -209,7 +207,7 @@ Trivia Lexer::commentify(BumpAllocator& alloc, std::span<Token> tokens) {
 }
 
 void Lexer::splitTokens(BumpAllocator& alloc, Diagnostics& diagnostics,
-                        const SourceManager& sourceManager, Token sourceToken, size_t offset,
+                        SourceManager& sourceManager, Token sourceToken, size_t offset,
                         KeywordVersion keywordVersion, SmallVectorBase<Token>& results) {
     auto loc = sourceToken.location();
     if (sourceManager.isMacroLoc(loc))
@@ -218,8 +216,9 @@ void Lexer::splitTokens(BumpAllocator& alloc, Diagnostics& diagnostics,
     auto sourceText = sourceManager.getSourceText(loc.buffer());
     SLANG_ASSERT(!sourceText.empty());
 
-    Lexer lexer{loc.buffer(), sourceText,  sourceToken.rawText().substr(offset).data(),
-                alloc,        diagnostics, LexerOptions{}};
+    Lexer lexer{loc.buffer(),  sourceText,  sourceToken.rawText().substr(offset).data(),
+                alloc,         diagnostics, sourceManager,
+                LexerOptions{}};
 
     size_t endOffset = loc.offset() + sourceToken.rawText().length();
     while (true) {
@@ -274,7 +273,13 @@ bool Lexer::isNextTokenOnSameLine() {
                         return false;
                     case '*':
                         advance(2);
-                        scanBlockComment();
+                        while (true) {
+                            if (consume('*') && consume('/'))
+                                break;
+                            if (peek() == '\0' && reallyAtEnd())
+                                return false;
+                            advance();
+                        }
                         break;
                     default:
                         return true;
@@ -1207,108 +1212,10 @@ void Lexer::scanWhitespace() {
     addTrivia(TriviaKind::Whitespace);
 }
 
-bool detectTranslateOnOffPragma(std::string_view view, bool offMode) {
-    if (view.length() < 2)
-        return false;
-    const char *p = view.data() + 2, *end = view.data() + view.size();
-
-    auto skipWs = [&] {
-        bool seen = false;
-        while (p != end && isWhitespace(*p)) {
-            seen = true;
-            p++;
-        }
-        return seen;
-    };
-
-    size_t cpos = 0;
-    auto clower = offMode ? TranslateOffPragmas.begin() : TranslateOnPragmas.begin();
-    auto cupper = offMode ? TranslateOffPragmas.end() : TranslateOnPragmas.end();
-
-    skipWs();
-    while (p != end) {
-        if ((*clower)[cpos] == ' ') {
-            if (!skipWs())
-                return false;
-
-            cpos++;
-        }
-        else {
-            while (clower < cupper && (*clower)[cpos] < *p)
-                clower++;
-            while (cupper > clower && (*(cupper - 1))[cpos] > *p)
-                cupper--;
-
-            if (clower == cupper)
-                return false;
-
-            cpos++;
-            p++;
-        }
-
-        if (cpos == clower->length()) {
-            // We have a complete match, check the comment line
-            // ends there or the match is followed by a whitespace
-            if (p == end || isWhitespace(*p))
-                return true;
-            return false;
-        }
-    }
-
-    return false;
-}
-
-void Lexer::scanTranslateOffSection() {
-    while (true) {
-        const char* commentStart = sourceBuffer;
-
-        switch (peek()) {
-            case '\0':
-                if (reallyAtEnd()) {
-                    addDiag(diag::UnclosedTranslateOff, currentOffset() - lexemeLength());
-                    return;
-                }
-                break;
-            case '/':
-                advance();
-                if (peek() == '/') {
-                    advance();
-                    while (!isNewline(peek()) && !reallyAtEnd())
-                        advance();
-
-                    std::string_view commentText =
-                        std::string_view(commentStart, (size_t)(sourceBuffer - commentStart));
-                    if (detectTranslateOnOffPragma(commentText, false))
-                        return;
-                }
-                continue;
-            default:
-                break;
-        }
-        advance();
-    }
-}
-
 void Lexer::scanLineComment() {
-    if (options.enableLegacyProtect) {
-        // See if we're looking at a pragma protect comment and skip
-        // over it if so.
-        while (peek() == ' ')
-            advance();
-
-        bool found = true;
-        for (char c : PragmaBeginProtected) {
-            if (!consume(c)) {
-                found = false;
-                break;
-            }
-        }
-
-        if (found) {
-            scanProtectComment();
-            addTrivia(TriviaKind::DisabledText);
-            return;
-        }
+    if (tryApplyCommentHandler()) [[unlikely]] {
+        addTrivia(TriviaKind::DisabledText);
+        return;
     }
 
     bool sawUTF8Error = false;
@@ -1334,18 +1241,15 @@ void Lexer::scanLineComment() {
         }
     }
 
-    if (options.enableTranslateOnOffCompat) {
-        if (detectTranslateOnOffPragma(lexeme(), true)) {
-            scanTranslateOffSection();
-            addTrivia(TriviaKind::DisabledText);
-            return;
-        }
-    }
-
     addTrivia(TriviaKind::LineComment);
 }
 
 void Lexer::scanBlockComment() {
+    if (tryApplyCommentHandler()) [[unlikely]] {
+        addTrivia(TriviaKind::DisabledText);
+        return;
+    }
+
     bool sawUTF8Error = false;
     while (true) {
         char c = peek();
@@ -1381,6 +1285,66 @@ void Lexer::scanBlockComment() {
     }
 
     addTrivia(TriviaKind::BlockComment);
+}
+
+bool Lexer::tryApplyCommentHandler() {
+    auto nextWord = [&]() {
+        // Skip over leading spaces and tabs.
+        while (isTabOrSpace(peek()))
+            advance();
+
+        auto start = sourceBuffer;
+        while (true) {
+            char c = peek();
+            if (!isAlphaNumeric(c) && c != '_' && c != '-')
+                break;
+
+            advance();
+        }
+
+        return std::string_view(start, size_t(sourceBuffer - start));
+    };
+
+    auto firstWord = nextWord();
+    auto it = options.commentHandlers.find(firstWord);
+    if (it == options.commentHandlers.end()) [[likely]]
+        return false;
+
+    auto it2 = it->second.find(nextWord());
+    if (it2 == it->second.end())
+        return false;
+
+    auto loc = [&] { return SourceLocation(bufferId, currentOffset()); };
+
+    auto& handler = it2->second;
+    switch (handler.kind) {
+        case CommentHandler::Protect:
+            // We need to see begin_protected, otherwise we ignore.
+            if (nextWord() == "begin_protected"sv) {
+                addDiag(diag::ProtectedEnvelope, currentOffset() - lexemeLength());
+                scanDisabledRegion(firstWord, "protect", "end_protected", diag::RawProtectEOF);
+                return true;
+            }
+            return false;
+        case CommentHandler::TranslateOff:
+            scanDisabledRegion(firstWord, handler.endRegion, std::nullopt,
+                               diag::UnclosedTranslateOff);
+            return true;
+        case CommentHandler::LintOff:
+            sourceManager.addDiagnosticDirective(loc(), nextWord(), DiagnosticSeverity::Ignored);
+            return false;
+        case CommentHandler::LintOn:
+            sourceManager.addDiagnosticDirective(loc(), nextWord(), DiagnosticSeverity::Warning);
+            return false;
+        case CommentHandler::LintSave:
+            sourceManager.addDiagnosticDirective(loc(), "__push__", DiagnosticSeverity::Ignored);
+            return false;
+        case CommentHandler::LintRestore:
+            sourceManager.addDiagnosticDirective(loc(), "__pop__", DiagnosticSeverity::Ignored);
+            return false;
+        default:
+            SLANG_UNREACHABLE;
+    }
 }
 
 bool Lexer::scanUTF8Char(bool alreadyErrored) {
@@ -1590,32 +1554,49 @@ void Lexer::scanEncodedText(ProtectEncoding encoding, uint32_t expectedBytes, bo
     }
 }
 
-void Lexer::scanProtectComment() {
-    addDiag(diag::ProtectedEnvelope, currentOffset() - PragmaBeginProtected.size());
+void Lexer::scanDisabledRegion(std::string_view firstWord, std::string_view secondWord,
+                               std::optional<std::string_view> thirdWord, DiagCode unclosedDiag) {
+    auto matchWord = [&](std::string_view word) {
+        while (isTabOrSpace(peek()))
+            advance();
+
+        for (char c : word) {
+            if (!consume(c))
+                return false;
+        }
+
+        char c = peek();
+        return isWhitespace(c) || c == '\0';
+    };
 
     while (true) {
         char c = peek();
         if (c == '\0' && reallyAtEnd()) {
-            addDiag(diag::RawProtectEOF, currentOffset() - 1);
+            auto& diag = addDiag(unclosedDiag, currentOffset() - lexemeLength());
+            if (unclosedDiag == diag::UnclosedTranslateOff)
+                diag << secondWord;
             return;
         }
 
         advance();
-        if (c == '/' && peek() == '/') {
+        if (c == '/' && (peek() == '/' || peek() == '*')) {
+            const bool isBlockComment = peek() == '*';
             advance();
-            while (peek() == ' ')
-                advance();
 
-            bool found = true;
-            for (char d : PragmaEndProtected) {
-                if (!consume(d)) {
-                    found = false;
-                    break;
+            if (matchWord(firstWord) && matchWord(secondWord)) {
+                if (!thirdWord || matchWord(*thirdWord)) {
+                    // Scan the rest of the comment and then return.
+                    // We discard the comment trivia from the buffer
+                    // so that this part of the region ends up as
+                    // a DisabledText trivia instead.
+                    if (isBlockComment)
+                        scanBlockComment();
+                    else
+                        scanLineComment();
+                    triviaBuffer.pop_back();
+                    return;
                 }
             }
-
-            if (found)
-                return;
         }
     }
 }

@@ -14,7 +14,7 @@
 #include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxFacts.h"
 #include "slang/util/Bag.h"
-#include "slang/util/Hash.h"
+#include "slang/util/FlatMap.h"
 #include "slang/util/LanguageVersion.h"
 
 namespace slang::parsing {
@@ -107,21 +107,18 @@ enum class FunctionOptions {
     /// No special options specified.
     None = 0,
 
-    /// Allow formal argument names to be ommitted.
-    AllowEmptyArgNames = 1 << 0,
-
     /// Allow the return type to be ommitted.
-    AllowImplicitReturn = 1 << 1,
+    AllowImplicitReturn = 1 << 0,
 
     /// The function header is for a prototype, so parsing rules
     /// are slightly different.
-    IsPrototype = 1 << 2,
+    IsPrototype = 1 << 1,
 
     /// Allow use of the 'default' argument.
-    AllowDefaultArg = 1 << 3,
+    AllowDefaultArg = 1 << 2,
 
     /// Allow override specifiers to be declared on the function prototype.
-    AllowOverrideSpecifiers = 1 << 4
+    AllowOverrideSpecifiers = 1 << 3
 };
 SLANG_BITMASK(FunctionOptions, AllowOverrideSpecifiers)
 
@@ -483,7 +480,9 @@ private:
 
     // Helper class for parsing out numeric literals.
     NumberParser numberParser;
+#ifndef __DOXYGEN__
     friend class NumberParser;
+#endif
 
     // A stack of names of modules declared locally within the given scope.
     // This is used to detect and ignore instantiations of local modules when

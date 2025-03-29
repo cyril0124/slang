@@ -147,7 +147,7 @@ Expression& Expression::convertAssignment(const ASTContext& context, const Type&
     const Type* rt = expr.type;
 
     auto finalizeType = [&](const Type& t) {
-        contextDetermined(context, result, nullptr, t, assignmentRange, /* isAssignment */ true);
+        contextDetermined(context, result, nullptr, t, assignmentRange, ConversionKind::Implicit);
     };
 
     if (type.isEquivalent(*rt)) {
@@ -303,6 +303,8 @@ static bool actuallyNeededCast(const Type& type, const Expression& operand) {
             return actuallyNeededCast(type, operand.as<MinTypMaxExpression>().selected());
         case ExpressionKind::ConditionalOp: {
             auto& cond = operand.as<ConditionalExpression>();
+            if (!type.isEquivalent(*cond.left().type) || !type.isEquivalent(*cond.right().type))
+                return true;
             return actuallyNeededCast(type, cond.left()) || actuallyNeededCast(type, cond.right());
         }
         default:
@@ -328,8 +330,6 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
         }
 
         operand = &create(comp, *syntax.right, context, ASTFlags::StreamingAllowed, type);
-        selfDetermined(context, operand);
-
         if (operand->bad())
             return badExpr(comp, nullptr);
     }
@@ -342,7 +342,7 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
         if (!context.requireValidBitWidth(width, targetExpr.sourceRange))
             return badExpr(comp, nullptr);
 
-        operand = &selfDetermined(comp, *syntax.right, context, ASTFlags::StreamingAllowed);
+        operand = &create(comp, *syntax.right, context, ASTFlags::StreamingAllowed);
         if (operand->bad())
             return badExpr(comp, nullptr);
 
@@ -405,10 +405,34 @@ Expression& ConversionExpression::fromSyntax(Compilation& comp, const CastExpres
     };
 
     if (type->isMatching(*operand->type) && !isGenvar() && !isDifferentTypedef() &&
-        ((assignmentTarget && assignmentTarget->isMatching(*type)) ||
+        ((assignmentTarget && assignmentTarget->isMatching(*type) &&
+          operand->kind != ExpressionKind::ConditionalOp) ||
          !actuallyNeededCast(*type, *operand))) {
         context.addDiag(diag::UselessCast, syntax.apostrophe.location())
             << *operand->type << targetExpr.sourceRange << operand->sourceRange;
+    }
+
+    if (type->isAssignmentCompatible(*operand->type)) {
+        // The type we propagate should use the sign of the operand, just like it
+        // would if we were doing an implicit conversion via an assignment expression.
+        auto propagatedType = type;
+        if (type->isNumeric() && operand->type->isNumeric()) {
+            propagatedType = OpInfo::binaryType(comp, type, operand->type, false,
+                                                /* signednessFromRt */ true);
+        }
+
+        contextDetermined(context, operand, nullptr, *propagatedType, syntax.apostrophe.range(),
+                          ConversionKind::Explicit);
+
+        if (operand->kind == ExpressionKind::Conversion &&
+            !operand->as<ConversionExpression>().isImplicit()) {
+            operand->sourceRange = syntax.sourceRange();
+            operand->type = type;
+            return *operand;
+        }
+    }
+    else {
+        selfDetermined(context, operand);
     }
 
     return *result();

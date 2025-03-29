@@ -10,6 +10,7 @@
 #include "slang/ast/ASTContext.h"
 #include "slang/ast/LValue.h"
 #include "slang/ast/SemanticFacts.h"
+#include "slang/util/SmallMap.h"
 
 namespace slang::ast {
 
@@ -69,6 +70,17 @@ SLANG_ENUM(ExpressionKind, EXPRESSION)
 #define RANGE(x) x(Simple) x(IndexedUp) x(IndexedDown)
 SLANG_ENUM(RangeSelectionKind, RANGE)
 #undef RANGE
+
+// clang-format off
+#define CK(x) \
+    x(Implicit) \
+    x(Propagated) \
+    x(StreamingConcat) \
+    x(Explicit) \
+    x(BitstreamCast)
+// clang-format on
+SLANG_ENUM(ConversionKind, CK)
+#undef CK
 // clang-format on
 
 /// The base class for all expressions in SystemVerilog.
@@ -397,7 +409,8 @@ protected:
     // Perform type propagation and constant folding of a context-determined subexpression.
     static void contextDetermined(const ASTContext& context, Expression*& expr,
                                   const Expression* parentExpr, const Type& newType,
-                                  SourceRange operatorRange, bool isAssignment = false);
+                                  SourceRange operatorRange,
+                                  ConversionKind conversionKind = ConversionKind::Propagated);
 
     // Perform type propagation and constant folding of a self-determined subexpression.
     static void selfDetermined(const ASTContext& context, Expression*& expr);

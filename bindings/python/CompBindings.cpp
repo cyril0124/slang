@@ -49,14 +49,14 @@ void registerCompilation(py::module_& m) {
         .value("AllowTopLevelIfacePorts", CompilationFlags::AllowTopLevelIfacePorts)
         .value("StrictDriverChecking", CompilationFlags::StrictDriverChecking)
         .value("LintMode", CompilationFlags::LintMode)
-        .value("SuppressUnused", CompilationFlags::SuppressUnused)
         .value("IgnoreUnknownModules", CompilationFlags::IgnoreUnknownModules)
         .value("RelaxStringConversions", CompilationFlags::RelaxStringConversions)
         .value("AllowRecursiveImplicitCall", CompilationFlags::AllowRecursiveImplicitCall)
         .value("AllowBareValParamAssignment", CompilationFlags::AllowBareValParamAssignment)
         .value("AllowSelfDeterminedStreamConcat", CompilationFlags::AllowSelfDeterminedStreamConcat)
         .value("AllowMultiDrivenLocals", CompilationFlags::AllowMultiDrivenLocals)
-        .value("AllowMergingAnsiPorts", CompilationFlags::AllowMergingAnsiPorts);
+        .value("AllowMergingAnsiPorts", CompilationFlags::AllowMergingAnsiPorts)
+        .value("DisableInstanceCaching", CompilationFlags::DisableInstanceCaching);
 
     py::class_<CompilationOptions>(m, "CompilationOptions")
         .def(py::init<>())
@@ -140,7 +140,8 @@ void registerCompilation(py::module_& m) {
         .def_property_readonly("unboundedType", &Compilation::getUnboundedType)
         .def_property_readonly("typeRefType", &Compilation::getTypeRefType)
         .def_property_readonly("wireNetType", &Compilation::getWireNetType)
-        .def_property_readonly("hasIssuedErrors", &Compilation::hasIssuedErrors);
+        .def_property_readonly("hasIssuedErrors", &Compilation::hasIssuedErrors)
+        .def_property_readonly("hasFatalErrors", &Compilation::hasFatalErrors);
 
     py::class_<Compilation::DefinitionLookupResult>(comp, "DefinitionLookupResult")
         .def(py::init<>())
@@ -193,7 +194,10 @@ void registerCompilation(py::module_& m) {
         .def("createOptionBag", &Driver::createOptionBag)
         .def("createCompilation", &Driver::createCompilation)
         .def("reportParseDiags", &Driver::reportParseDiags)
-        .def("reportCompilation", &Driver::reportCompilation, "compilation"_a, "quiet"_a);
+        .def("reportCompilation", &Driver::reportCompilation, "compilation"_a, "quiet"_a)
+        .def("runAnalysis", &Driver::runAnalysis, "compilation"_a)
+        .def("reportDiagnostics", &Driver::reportDiagnostics, "quiet"_a)
+        .def("runFullCompilation", &Driver::runFullCompilation, "quiet"_a = false);
 
     py::class_<SourceOptions>(m, "SourceOptions")
         .def(py::init<>())

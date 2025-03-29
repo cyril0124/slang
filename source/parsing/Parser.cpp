@@ -8,6 +8,7 @@
 #include "slang/parsing/Parser.h"
 
 #include "slang/diagnostics/ParserDiags.h"
+#include "slang/util/SmallMap.h"
 
 namespace slang::parsing {
 
@@ -435,7 +436,7 @@ StructUnionTypeSyntax& Parser::parseStructUnion(SyntaxKind syntaxKind) {
         closeBrace = missingToken(TokenKind::CloseBrace, openBrace.location());
     else {
         auto curr = peek();
-        while (curr.kind != TokenKind::CloseBrace && curr.kind != TokenKind::EndOfFile) {
+        while (isPossibleStructMember(curr.kind)) {
             auto attributes = parseAttributes();
 
             Token randomQualifier;

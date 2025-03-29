@@ -3448,44 +3448,6 @@ endmodule
     NO_COMPILATION_ERRORS;
 }
 
-TEST_CASE("Unused var checking intersected with generic classes -- GH #1142") {
-    auto tree = SyntaxTree::fromText(R"(
-class A #(type T);
-endclass
-
-class B #(type T);
-    task get((* unused *) output T t);
-    endtask
-endclass
-
-class C #(type T = int);
-    B #(T) b;
-    (* unused *) typedef A #(C) unused;
-
-    task test();
-        T t;
-        forever begin
-            b.get(t);
-            process(t);
-        end
-    endtask
-
-    function void process((* unused *) T t);
-    endfunction
-endclass
-
-module top;
-endmodule
-)");
-
-    CompilationOptions coptions;
-    coptions.flags = CompilationFlags::None;
-
-    Compilation compilation(coptions);
-    compilation.addSyntaxTree(tree);
-    NO_COMPILATION_ERRORS;
-}
-
 TEST_CASE("Class randomize can't access protected members") {
     auto tree = SyntaxTree::fromText(R"(
 class C;
@@ -3554,4 +3516,19 @@ endinterface
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     compilation.getAllDiagnostics();
+}
+
+TEST_CASE("Class prototypes allow missing arg names -- GH #1273") {
+    auto tree = SyntaxTree::fromText(R"(
+class RegisterFile;
+    extern function void SetN(logic);
+endclass
+
+function void RegisterFile::SetN(logic l);
+endfunction
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
 }

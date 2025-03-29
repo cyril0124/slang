@@ -5,6 +5,9 @@
 
 add_executable(
   unittests
+  analysis/AnalysisTests.cpp
+  analysis/AssertionAnalysisTests.cpp
+  analysis/UnusedTests.cpp
   ast/AssertionTests.cpp
   ast/ClassTests.cpp
   ast/ConfigTests.cpp
@@ -35,7 +38,6 @@ add_executable(
   util/IntervalMapTests.cpp
   util/NumericTests.cpp
   util/SmallVectorTests.cpp
-  util/ThreadPoolTests.cpp
   util/UtilTests.cpp
   DriverTests.cpp
   FileTests.cpp

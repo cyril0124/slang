@@ -28,7 +28,7 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(gitversion)
 get_git_version(SLANG_VERSION_PATCH SLANG_VERSION_HASH)
 
-set(SLANG_VERSION_MAJOR 7)
+set(SLANG_VERSION_MAJOR 8)
 set(SLANG_VERSION_MINOR 0)
 set(SLANG_VERSION_STRING
     "${SLANG_VERSION_MAJOR}.${SLANG_VERSION_MINOR}.${SLANG_VERSION_PATCH}")
@@ -64,11 +64,14 @@ option(SLANG_INCLUDE_PYLIB "Include the pyslang python module in the build" OFF)
 option(SLANG_INCLUDE_INSTALL "Include installation targets"
        ${SLANG_MASTER_PROJECT})
 option(SLANG_INCLUDE_COVERAGE "Enable code coverage" OFF)
+option(SLANG_INCLUDE_THREADTEST "Include threadtest target in the build" OFF)
+option(SLANG_INCLUDE_UVM_TEST "Include UVM as a test target in the build" OFF)
 option(SLANG_CI_BUILD "Enable longer running tests for CI builds" OFF)
 option(SLANG_FUZZ_TARGET "Enables changes to make binaries easier to fuzz test"
        OFF)
 option(BUILD_SHARED_LIBS "Generate shared libraries instead of static" OFF)
 option(SLANG_USE_MIMALLOC "Enable use of the mimalloc library" ON)
+option(SLANG_USE_CPPTRACE "Enable use of the cpptrace library" OFF)
 
 set(SLANG_LIB_NAME
     "svlang"

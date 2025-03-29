@@ -7,13 +7,14 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/text/Json.h"
 
-std::string serialize(Compilation& comp, bool sourceInfo = false) {
+std::string serialize(Compilation& comp, bool sourceInfo = false, bool detailedTypeInfo = false) {
     JsonWriter writer;
     writer.setPrettyPrint(true);
 
     ASTSerializer serializer(comp, writer);
     serializer.setIncludeAddresses(false);
     serializer.setIncludeSourceInfo(sourceInfo);
+    serializer.setDetailedTypeInfo(detailedTypeInfo);
     serializer.serialize(comp.getRoot());
 
     return "\n"s + std::string(writer.view());
@@ -136,20 +137,6 @@ endmodule
         "source_column": 8,
         "members": [
           {
-            "name": "STATE_0",
-            "kind": "TransparentMember",
-            "source_file": "source",
-            "source_line": 4,
-            "source_column": 9
-          },
-          {
-            "name": "STATE_1",
-            "kind": "TransparentMember",
-            "source_file": "source",
-            "source_line": 5,
-            "source_column": 9
-          },
-          {
             "name": "STATE",
             "kind": "TypeAlias",
             "source_file": "source",
@@ -163,7 +150,7 @@ endmodule
             "source_file": "source",
             "source_line": 8,
             "source_column": 11,
-            "type": "enum{STATE_0=1'd0,STATE_1=1'd1}test_enum.STATE",
+            "type": "test_enum.STATE",
             "initializer": {
               "source_file_start": "source",
               "source_file_end": "source",
@@ -464,40 +451,32 @@ endmodule
                   "body": {
                     "kind": "Clocking",
                     "clocking": {
-                      "kind": "SignalEvent",
-                      "expr": {
-                        "kind": "ClockingEvent",
-                        "type": "void",
-                        "timingControl": {
-                          "kind": "EventList",
-                          "events": [
-                            {
-                              "kind": "SignalEvent",
-                              "expr": {
-                                "kind": "NamedValue",
-                                "type": "logic",
-                                "symbol": "x1"
-                              },
-                              "edge": "None",
-                              "iff": {
-                                "kind": "NamedValue",
-                                "type": "logic",
-                                "symbol": "y1"
-                              }
-                            },
-                            {
-                              "kind": "SignalEvent",
-                              "expr": {
-                                "kind": "NamedValue",
-                                "type": "logic",
-                                "symbol": "clk"
-                              },
-                              "edge": "NegEdge"
-                            }
-                          ]
+                      "kind": "EventList",
+                      "events": [
+                        {
+                          "kind": "SignalEvent",
+                          "expr": {
+                            "kind": "NamedValue",
+                            "type": "logic",
+                            "symbol": "x1"
+                          },
+                          "edge": "None",
+                          "iff": {
+                            "kind": "NamedValue",
+                            "type": "logic",
+                            "symbol": "y1"
+                          }
+                        },
+                        {
+                          "kind": "SignalEvent",
+                          "expr": {
+                            "kind": "NamedValue",
+                            "type": "logic",
+                            "symbol": "clk"
+                          },
+                          "edge": "NegEdge"
                         }
-                      },
-                      "edge": "None"
+                      ]
                     },
                     "expr": {
                       "kind": "SequenceConcat",
@@ -727,7 +706,7 @@ endclass
                             {
                               "name": "CrossQueueType",
                               "kind": "TypeAlias",
-                              "target": "struct{logic[0:0] e;logic[0:0] y;}C3.CrossValType$[$]"
+                              "target": "C3.CrossValType$[$]"
                             }
                           ]
                         }
@@ -798,25 +777,30 @@ endclass
 })");
 }
 
-TEST_CASE("Serializing uninstantiated defs with implicit named connections") {
+TEST_CASE("Serializing types and type aliase targets") {
     auto tree = SyntaxTree::fromText(R"(
-module top;
-endmodule
+typedef union packed {
+    logic [31:0] inst;
+} INST;
 
-module n #(parameter int j);
-    int foo;
-    m m1(
-        .foo,
-        .bar()
-    );
-endmodule
+typedef struct packed {
+    INST inst;
+    logic another_signal;
+} CONTAINER;
+
+typedef enum logic [1:0] {
+    BYTE   = 2'h0,
+    HALF   = 2'h1,
+    WORD   = 2'h2,
+    DOUBLE = 2'h3
+} MEM_SIZE;
 )");
 
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 
-    auto result = serialize(compilation);
+    auto result = serialize(compilation, false, true);
     CHECK(result == R"(
 {
   "name": "$root",
@@ -824,71 +808,239 @@ endmodule
   "members": [
     {
       "name": "",
-      "kind": "CompilationUnit"
-    },
-    {
-      "name": "top",
-      "kind": "Instance",
-      "body": {
-        "name": "top",
-        "kind": "InstanceBody",
-        "definition": "top"
-      },
-      "connections": [
-      ]
-    },
-    {
-      "name": "",
-      "kind": "Instance",
-      "body": {
-        "name": "n",
-        "kind": "InstanceBody",
-        "members": [
-          {
-            "name": "j",
-            "kind": "Parameter",
-            "type": "int",
-            "value": "<unset>",
-            "isLocal": false,
-            "isPort": true,
-            "isBody": false
-          },
-          {
-            "name": "foo",
-            "kind": "Variable",
-            "type": "int",
-            "lifetime": "Static"
-          },
-          {
-            "name": "m1",
-            "kind": "UninstantiatedDef",
-            "definitionName": "m",
-            "parameters": [
-            ],
-            "ports": [
+      "kind": "CompilationUnit",
+      "members": [
+        {
+          "name": "INST",
+          "kind": "TypeAlias",
+          "target": {
+            "name": "",
+            "kind": "PackedUnionType",
+            "members": [
               {
-                "name": "foo",
-                "expr": {
-                  "kind": "Simple",
-                  "expr": {
-                    "kind": "NamedValue",
-                    "type": "int",
-                    "symbol": "foo"
+                "name": "inst",
+                "kind": "Field",
+                "type": {
+                  "name": "",
+                  "kind": "PackedArrayType",
+                  "elementType": {
+                    "name": "logic",
+                    "kind": "ScalarType"
+                  },
+                  "range": "[31:0]"
+                },
+                "lifetime": "Automatic",
+                "bitOffset": 0,
+                "fieldIndex": 0
+              }
+            ],
+            "isTagged": false,
+            "isSoft": false
+          }
+        },
+        {
+          "name": "CONTAINER",
+          "kind": "TypeAlias",
+          "target": {
+            "name": "",
+            "kind": "PackedStructType",
+            "members": [
+              {
+                "name": "inst",
+                "kind": "Field",
+                "type": {
+                  "name": "INST",
+                  "kind": "TypeAlias",
+                  "target": {
+                    "name": "",
+                    "kind": "PackedUnionType",
+                    "members": [
+                      {
+                        "name": "inst",
+                        "kind": "Field",
+                        "type": {
+                          "name": "",
+                          "kind": "PackedArrayType",
+                          "elementType": {
+                            "name": "logic",
+                            "kind": "ScalarType"
+                          },
+                          "range": "[31:0]"
+                        },
+                        "lifetime": "Automatic",
+                        "bitOffset": 0,
+                        "fieldIndex": 0
+                      }
+                    ],
+                    "isTagged": false,
+                    "isSoft": false
                   }
-                }
+                },
+                "lifetime": "Automatic",
+                "bitOffset": 1,
+                "fieldIndex": 0
               },
               {
-                "name": "bar",
-                "expr": {
-                  "kind": "Invalid"
-                }
+                "name": "another_signal",
+                "kind": "Field",
+                "type": {
+                  "name": "logic",
+                  "kind": "ScalarType"
+                },
+                "lifetime": "Automatic",
+                "bitOffset": 0,
+                "fieldIndex": 1
               }
             ]
           }
-        ],
-        "definition": "n"
-      },
-      "connections": [
+        },
+        {
+          "name": "MEM_SIZE",
+          "kind": "TypeAlias",
+          "target": {
+            "name": "MEM_SIZE",
+            "kind": "EnumType",
+            "members": [
+              {
+                "name": "BYTE",
+                "kind": "EnumValue",
+                "initializer": {
+                  "kind": "Conversion",
+                  "type": {
+                    "name": "",
+                    "kind": "PackedArrayType",
+                    "elementType": {
+                      "name": "logic",
+                      "kind": "ScalarType"
+                    },
+                    "range": "[1:0]"
+                  },
+                  "operand": {
+                    "kind": "IntegerLiteral",
+                    "type": {
+                      "name": "",
+                      "kind": "PackedArrayType",
+                      "elementType": {
+                        "name": "bit",
+                        "kind": "ScalarType"
+                      },
+                      "range": "[1:0]"
+                    },
+                    "value": "2'b0",
+                    "constant": "2'b0"
+                  },
+                  "constant": "2'b0"
+                },
+                "value": "2'b0"
+              },
+              {
+                "name": "HALF",
+                "kind": "EnumValue",
+                "initializer": {
+                  "kind": "Conversion",
+                  "type": {
+                    "name": "",
+                    "kind": "PackedArrayType",
+                    "elementType": {
+                      "name": "logic",
+                      "kind": "ScalarType"
+                    },
+                    "range": "[1:0]"
+                  },
+                  "operand": {
+                    "kind": "IntegerLiteral",
+                    "type": {
+                      "name": "",
+                      "kind": "PackedArrayType",
+                      "elementType": {
+                        "name": "bit",
+                        "kind": "ScalarType"
+                      },
+                      "range": "[1:0]"
+                    },
+                    "value": "2'b1",
+                    "constant": "2'b1"
+                  },
+                  "constant": "2'b1"
+                },
+                "value": "2'b1"
+              },
+              {
+                "name": "WORD",
+                "kind": "EnumValue",
+                "initializer": {
+                  "kind": "Conversion",
+                  "type": {
+                    "name": "",
+                    "kind": "PackedArrayType",
+                    "elementType": {
+                      "name": "logic",
+                      "kind": "ScalarType"
+                    },
+                    "range": "[1:0]"
+                  },
+                  "operand": {
+                    "kind": "IntegerLiteral",
+                    "type": {
+                      "name": "",
+                      "kind": "PackedArrayType",
+                      "elementType": {
+                        "name": "bit",
+                        "kind": "ScalarType"
+                      },
+                      "range": "[1:0]"
+                    },
+                    "value": "2'b10",
+                    "constant": "2'b10"
+                  },
+                  "constant": "2'b10"
+                },
+                "value": "2'b10"
+              },
+              {
+                "name": "DOUBLE",
+                "kind": "EnumValue",
+                "initializer": {
+                  "kind": "Conversion",
+                  "type": {
+                    "name": "",
+                    "kind": "PackedArrayType",
+                    "elementType": {
+                      "name": "logic",
+                      "kind": "ScalarType"
+                    },
+                    "range": "[1:0]"
+                  },
+                  "operand": {
+                    "kind": "IntegerLiteral",
+                    "type": {
+                      "name": "",
+                      "kind": "PackedArrayType",
+                      "elementType": {
+                        "name": "bit",
+                        "kind": "ScalarType"
+                      },
+                      "range": "[1:0]"
+                    },
+                    "value": "2'b11",
+                    "constant": "2'b11"
+                  },
+                  "constant": "2'b11"
+                },
+                "value": "2'b11"
+              }
+            ],
+            "baseType": {
+              "name": "",
+              "kind": "PackedArrayType",
+              "elementType": {
+                "name": "logic",
+                "kind": "ScalarType"
+              },
+              "range": "[1:0]"
+            }
+          }
+        }
       ]
     }
   ]

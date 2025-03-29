@@ -6,8 +6,41 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 ### Language Support
+* Added support for clock flow, clock resolution, and clock inference rules in checkers and assertions
+  * Various cases of invalid clock usage will now issue appropriate errors
+* Implemented rules for which kinds of sequences and properties can be declared in clocking blocks
+
+### Potentially Breaking Changes
+* AST serialization no longer includes uninstantiated scopes in the output
+* `Driver::reportCompilation` method had part of its functionality split out into `Driver::reportDiagnostics` to allow for calling the new `Driver::runAnalysis` method in between. There is a new `Driver::runFullCompilation` method that wraps all of this for convenience if you don't care about controlling when each pass is done.
+
+### New Features
+* slang can now optionally use [cpptrace](https://github.com/jeremy-rifkin/cpptrace) (using the `SLANG_USE_CPPTRACE` CMake option) for better backtraces in the event of internal assertions or exceptions thrown
+* There is a new post-elaboration analysis pass in slang that does additional checking for enforcing specific language rules and reporting extra warnings. This can be disabled with the `--disable-analysis` flag, though it should not be needed unless there is a bug in slang.
+* Added a new option `--diag-abs-paths` to report diagnostics with absolute instead of relative file paths
+
+### Improvements
+* slang now performs instance caching by default, which means duplicate instance bodies will not be visited during elaboration, which can greatly speed up elaboration times for large projects. This behavior can be disabled with the `--disable-instance-caching` flag, though it should not be needed unless there's a bug in slang -- please open an issue if you find that you need the flag.
+* Added some initial documentation and an API reference for the pyslang bindings (thanks to @parker-research)
+
+### Fixes
+* The restriction on interface instances targeted by defparams not being allowed with virtual interfaces was also erroneously applied to interface port connections
+* Fixed a null pointer crash in slang-tidy (thanks to @rhanqtl)
+* Fixed a bug that could cause infinite recursion when instantiating bind targets that force elaboration due to wildcard package imports
+* Fixed the handling of disable region directives declared in block comments (as opposed to single line comments which were working fine)
+* Fixed argument binding for sequence and property instances when using named arguments
+* Concurrent assertion and procedural checker statements are now correctly disallowed from appearing in subroutines and final blocks
+* Fixed an issue with how checker formal ports are looked up from within checker instances
+
+
+## [v8.0] - 2025-02-05
+### Language Support
 * Disallow access to protected members from class scoped randomize constraint blocks -- the LRM is unclear about this but other tools seem to have decided this way made the most sense
 * Added a check that net aliases aren't duplicated, and that nets don't alias to themselves, as mandated by the LRM (thanks to @likeamahoney)
+* Implemented remaining rules for virtual interfaces:
+  * Virtual interfaces can't have hierarchical references to objects outside the interface
+  * Virtual interfaces can't have interface ports
+  * Instances assigned to a virtual interface can't have an instance configuration rule applied to them
 
 ### Potentially Breaking Changes
 * The minimum supported Xcode version is now 16 and the minimum supported Clang version is now 17 (to allow cleaning up workarounds for various bugs)
@@ -23,6 +56,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Added [-Wcase-dup](https://sv-lang.com/warning-ref.html#case-dup) which warns about duplicate item expressions in a case statement
 * Added [-Wcase-overlap](https://sv-lang.com/warning-ref.html#case-overlap) which warns about overlapping case items (due to wildcard bits)
 * Added [-Wcase-not-wildcard](https://sv-lang.com/warning-ref.html#case-not-wildcard) and [-Wcasez-with-x](https://sv-lang.com/warning-ref.html#casez-with-x) which warn about potentially misleading wildcard bits in non-wildcard case statements
+* Added initial support for instance caching, which skips elaborating identical module instances to speed up elaboration. This is currently hidden behind the `--disable-instance-caching` command line flag because when turned on not all multi-driven errors are properly issued. Once all issues have been worked out the feature will be turned on by default.
+* Added the ability to output diagnostics to JSON instead of (or in addition to) plain text
+* Added `--translate-off-format` which allows specifying comment directives that should act as skipped regions (for example, `// pragma translate_off` and `// pragma translate_on`)
+* slang warnings can now be turned on and off within source code using `// slang lint_off` style comment directives
+* Added `--ast-json-detailed-types` to include detailed type information in AST JSON output
+* slang-tidy gained a `clkNameRegexString` option to control how clocks are named (thanks to @spomatasmd)
 
 ### Improvements
 * Made -Wuseless-cast a bit less noisy -- it now does not warn about expressions involving genvars or cases where types are matching but one or the other has a different typedef alias name
@@ -33,6 +72,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Changed the error issued for sequences that can never be matched to be a warning instead (-Wseq-no-match) and added additional context to the diagnostic message
 * Made minor tweaks to improve defparam and bind resolution performance
 * -Wsign-conversion will no longer warn for certain system functions that have a return type of `int` but in practice only return a single bit result
+* Made some minor improvements to parser error recovery when struct definitions are missing a closing brace
+* Inline genvars declared in generate loops are now included in the generate loop's members list when serializing the AST
+* The pyslang packaging build is now done in this repo instead of a separate downstream repo (thanks to @parker-research)
+* pyslang wheels now include support for arm64 (thanks to @gadfort)
+* Documentation now includes the READMEs for the various ancillary slang tools
+* Added stub generation to the Python distribution (thanks to @parker-research)
 
 ### Fixes
 * Fixed a bug with constant evaluation of left-hand side assignment patterns that require implicit conversions to be applied
@@ -57,6 +102,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 * Fixed a potentially unbounded loop when resolving a specific case of invalid bind directives
 * Fixed bad diagnostic output related to instantiating properties with missing formal argument names
 * Fixed several minor issues with the Python bindings (thanks to @parker-research)
+* Fixed bugs with pattern variables not being visible in certain scopes where they otherwise should have been
+* Pattern variables are now properly usable from static variable initializer expressions
+* $sformat in constant expressions now works properly with %p specifiers
+* Fixed -Wwidth-expand to apply to conditional expressions
+* Fixed \[\*\] and ##\[\*\] sequence repetitions to start from 0 instead of 1 (thanks to @georgerennie)
+* Fixed a case where nested attributes were not properly diagnosed (thanks to @likeamahoney)
+* Fixed type resolution for expressions involving static casts; previously the operand of the cast was considered self determined, but now the type of the cast is correctly propagated to the operand
+* Fixed a bug in SyntaxNode::isEquivalentTo which would cause it to sometimes return the wrong result
+* Fixed the direction of argument binding for n-output gate terminals
 
 
 ## [v7.0] - 2024-09-26

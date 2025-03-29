@@ -333,6 +333,12 @@ Statement& ConcurrentAssertionStatement::fromSyntax(
         return badStmt(compilation, nullptr);
     }
 
+    auto proc = context.getProceduralBlock();
+    if (!proc || proc->procedureKind == ProceduralBlockKind::Final) {
+        context.addDiag(diag::ConcurrentAssertNotInProc, syntax.sourceRange());
+        return badStmt(compilation, nullptr);
+    }
+
     ASTContext ctx = context;
     ctx.clearInstanceAndProc();
 
@@ -704,9 +710,13 @@ void RandCaseStatement::serializeTo(ASTSerializer& serializer) const {
     serializer.endArray();
 }
 
-Statement& RandSequenceStatement::fromSyntax(Compilation& compilation,
+Statement& RandSequenceStatement::fromSyntax(Compilation& comp,
                                              const RandSequenceStatementSyntax& syntax,
                                              const ASTContext& context) {
+    SmallVector<const RandSeqProductionSymbol*> productions;
+    for (auto& prod : context.scope->membersOfType<RandSeqProductionSymbol>())
+        productions.push_back(&prod);
+
     SourceRange firstProdRange;
     const RandSeqProductionSymbol* firstProd = nullptr;
     if (syntax.firstProduction) {
@@ -714,12 +724,9 @@ Statement& RandSequenceStatement::fromSyntax(Compilation& compilation,
         firstProd = RandSeqProductionSymbol::findProduction(syntax.firstProduction.valueText(),
                                                             firstProdRange, context);
     }
-    else {
-        auto prodRange = context.scope->membersOfType<RandSeqProductionSymbol>();
-        if (prodRange.begin() != prodRange.end()) {
-            firstProd = &*prodRange.begin();
-            firstProdRange = {syntax.randsequence.location(), syntax.closeParen.range().end()};
-        }
+    else if (!productions.empty()) {
+        firstProd = productions[0];
+        firstProdRange = {syntax.randsequence.location(), syntax.closeParen.range().end()};
     }
 
     if (firstProd) {
@@ -730,7 +737,8 @@ Statement& RandSequenceStatement::fromSyntax(Compilation& compilation,
     }
 
     // All of the logic for creating productions is in the RandSeqProduction symbol.
-    return *compilation.emplace<RandSequenceStatement>(firstProd, syntax.sourceRange());
+    return *comp.emplace<RandSequenceStatement>(firstProd, productions.copy(comp),
+                                                syntax.sourceRange());
 }
 
 ER RandSequenceStatement::evalImpl(EvalContext& context) const {
@@ -745,7 +753,19 @@ void RandSequenceStatement::serializeTo(ASTSerializer& serializer) const {
 
 Statement& ProceduralCheckerStatement::fromSyntax(Compilation& comp,
                                                   const CheckerInstanceStatementSyntax& syntax,
-                                                  const ASTContext& context) {
+                                                  const ASTContext& context,
+                                                  StatementContext& stmtCtx) {
+    auto proc = context.getProceduralBlock();
+    if (!proc || proc->procedureKind == ProceduralBlockKind::Final) {
+        context.addDiag(diag::CheckerNotInProc, syntax.sourceRange());
+        return badStmt(comp, nullptr);
+    }
+
+    if (stmtCtx.flags.has(StatementFlags::InForkJoin)) {
+        context.addDiag(diag::CheckerInForkJoin, syntax.sourceRange());
+        return badStmt(comp, nullptr);
+    }
+
     // Find all of the checkers that were pre-created for this syntax node.
     // It's possible to not find them if there were errors in the declaration,
     // so we don't issue errors here -- they are already handled.

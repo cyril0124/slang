@@ -11,6 +11,7 @@
 
 #include "slang/text/Glob.h"
 #include "slang/util/OS.h"
+#include "slang/util/SmallMap.h"
 #include "slang/util/String.h"
 
 namespace fs = std::filesystem;
@@ -442,6 +443,11 @@ std::span<const SourceManager::DiagnosticDirectiveInfo> SourceManager::getDiagno
     if (auto it = diagDirectives.find(buffer); it != diagDirectives.end())
         return it->second;
     return {};
+}
+
+void SourceManager::clearDiagnosticDirectives() {
+    std::unique_lock lock(mutex);
+    diagDirectives.clear();
 }
 
 std::vector<BufferID> SourceManager::getAllBuffers() const {

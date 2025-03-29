@@ -239,8 +239,34 @@ bool ValueExpressionBase::requireLValueImpl(const ASTContext& context, SourceLoc
             return false;
         }
 
-        if (auto expr = modportPort.getConnectionExpr())
+        if (auto expr = modportPort.getConnectionExpr()) {
+            // We want to record this redirection with the compilation as a side
+            // effect of the instance port used to get here. Normally that gets
+            // done in the ValueSymbol::addDriver call but because we redirect
+            // here we'll lose that information so need to do it manually.
+            if (!context.flags.has(ASTFlags::NotADriver) && !context.scope->isUninstantiated() &&
+                kind == ExpressionKind::HierarchicalValue && !longestStaticPrefix) {
+
+                auto& hve = as<HierarchicalValueExpression>();
+                if (hve.ref.isViaIfacePort()) {
+                    auto& comp = context.getCompilation();
+                    auto driver = comp.emplace<ValueDriver>(context.getDriverKind(), *this,
+                                                            context.getContainingSymbol(), flags);
+                    comp.noteInterfacePortDriver(hve.ref, *driver);
+                }
+            }
+
+            // The assignment is actually to the underlying connection expression,
+            // so redirect it there.
             return expr->requireLValue(context, location, flags, longestStaticPrefix);
+        }
+    }
+
+    if (kind == ExpressionKind::HierarchicalValue && !context.flags.has(ASTFlags::NotADriver) &&
+        !context.scope->isUninstantiated()) {
+        auto& ref = as<HierarchicalValueExpression>().ref;
+        if (!ref.isViaIfacePort())
+            context.getCompilation().noteHierarchicalAssignment(ref);
     }
 
     if (!longestStaticPrefix)
@@ -488,11 +514,13 @@ HierarchicalValueExpression::HierarchicalValueExpression(const Scope& scope,
     SLANG_ASSERT(ref.target == &symbol);
     this->ref.expr = this;
 
-    scope.getCompilation().noteHierarchicalReference(scope, this->ref);
+    if (this->ref.isUpward())
+        scope.getCompilation().noteUpwardReference(scope, this->ref);
 }
 
 ConstantValue HierarchicalValueExpression::evalImpl(EvalContext& context) const {
-    if (!context.getCompilation().hasFlag(CompilationFlags::AllowHierarchicalConst) &&
+    if (!ref.isViaIfacePort() &&
+        !context.getCompilation().hasFlag(CompilationFlags::AllowHierarchicalConst) &&
         !context.astCtx.flags.has(ASTFlags::ConfigParam)) {
         context.addDiag(diag::ConstEvalHierarchicalName, sourceRange) << symbol.name;
         return nullptr;
@@ -500,16 +528,6 @@ ConstantValue HierarchicalValueExpression::evalImpl(EvalContext& context) const 
 
     if (!checkConstantBase(context))
         return nullptr;
-
-    switch (symbol.kind) {
-        case SymbolKind::Parameter:
-        case SymbolKind::EnumValue:
-        case SymbolKind::Specparam:
-            break;
-        default:
-            context.addDiag(diag::ConstEvalHierarchicalName, sourceRange) << symbol.name;
-            return nullptr;
-    }
 
     switch (symbol.kind) {
         case SymbolKind::Parameter: {
@@ -527,7 +545,8 @@ ConstantValue HierarchicalValueExpression::evalImpl(EvalContext& context) const 
         case SymbolKind::Specparam:
             return symbol.as<SpecparamSymbol>().getValue(sourceRange);
         default:
-            SLANG_UNREACHABLE;
+            context.addDiag(diag::ConstEvalHierarchicalName, sourceRange) << symbol.name;
+            return nullptr;
     }
 }
 
@@ -561,7 +580,9 @@ ArbitrarySymbolExpression::ArbitrarySymbolExpression(const Scope& scope, const S
     if (hierRef && hierRef->target) {
         this->hierRef = *hierRef;
         this->hierRef.expr = this;
-        scope.getCompilation().noteHierarchicalReference(scope, this->hierRef);
+
+        if (this->hierRef.isUpward())
+            scope.getCompilation().noteUpwardReference(scope, this->hierRef);
     }
 }
 
@@ -937,8 +958,8 @@ Expression& AssertionInstanceExpression::fromLookup(const Symbol& symbol,
             // any were unused.
             it->second.second = true;
 
-            auto arg = it->second.first->expr;
-            if (!arg) {
+            expr = it->second.first->expr;
+            if (!expr) {
                 // Empty arguments are allowed as long as a default is provided.
                 setDefault();
                 if (!expr && !formal->name.empty()) {
@@ -1161,10 +1182,24 @@ Expression& AssertionInstanceExpression::bindPort(const Symbol& symbol, SourceRa
         inst = inst->argDetails;
 
     // The only way to reference an assertion port should be from within
-    // an assertion instance, so we should always find it here.
+    // an assertion or checker instance.
     auto it = inst->argumentMap.find(&symbol);
-    if (it == inst->argumentMap.end())
+    if (it == inst->argumentMap.end()) {
+        // Walk through our previous assertion contexts to see if one of
+        // them is a checker instance, in which case this argument might
+        // be a reference to a checker port.
+        auto ctx = inst->prevContext;
+        while (ctx) {
+            inst = ctx->assertionInstance;
+            if (!inst || (inst->symbol && inst->symbol->kind == SymbolKind::Checker))
+                return bindPort(symbol, range, ctx->resetFlags(instanceCtx.flags));
+
+            ctx = inst->prevContext;
+        }
+
+        SLANG_ASSERT(false);
         return badExpr(comp, nullptr);
+    }
 
     auto& formal = symbol.as<AssertionPortSymbol>();
     auto& type = formal.declaredType.getType();
@@ -1340,7 +1375,7 @@ Expression& MinTypMaxExpression::fromSyntax(Compilation& compilation,
 }
 
 bool MinTypMaxExpression::propagateType(const ASTContext& context, const Type& newType,
-                                        SourceRange opRange) {
+                                        SourceRange opRange, ConversionKind) {
     // Only the selected expression gets a propagated type.
     type = &newType;
     contextDetermined(context, selected_, this, newType, opRange);

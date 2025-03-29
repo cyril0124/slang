@@ -111,9 +111,12 @@ enum class SLANG_EXPORT LookupResultFlags : uint8_t {
 
     /// The lookup was resolved through a forwarded typedef. Some language
     /// rules restrict where this can be done.
-    FromForwardTypedef = 1 << 4
+    FromForwardTypedef = 1 << 4,
+
+    /// The lookup was resolved through an interface port connection.
+    IfacePort = 1 << 5
 };
-SLANG_BITMASK(LookupResultFlags, FromForwardTypedef)
+SLANG_BITMASK(LookupResultFlags, IfacePort)
 
 /// This type denotes the ordering of symbols within a particular scope, for the purposes of
 /// determining whether a found symbol is visible compared to the given location.
@@ -261,7 +264,7 @@ public:
                                      const ASTContext& context, LookupResult& result);
 
     /// Applies the given @a selectors to the @a virtualInterface type and returns the
-    /// selected child in @result -- if any errors occur, diagnostics are issued to
+    /// selected child in @a result -- if any errors occur, diagnostics are issued to
     /// the result object and nullptr is returned.
     static void selectChild(const Type& virtualInterface, SourceRange range,
                             std::span<LookupResult::Selector> selectors, const ASTContext& context,

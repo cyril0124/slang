@@ -1624,3 +1624,36 @@ module m;
     end
 endmodule
 ```
+
+-Winferred-latch
+A signal assigned in an always_comb procedure is not assigned on all control
+paths and so infers a latch instead of combinatorial logic.
+@options --disable-analysis=false
+```
+module m(input logic a, output logic b);
+    always_comb begin
+        if (a)
+            b = 0;
+    end
+endmodule
+```
+
+-Wmissing-return
+A non-void function has no return statements and does not
+assign to its return value variable.
+```
+function int foo;
+endfunction
+```
+
+-Wincomplete-return
+A non-void function has return statements or assigns to its
+return value variable but does not do so on all control paths
+through the function.
+```
+function int foo(input a);
+    if (a) begin
+        return 1;
+    end
+endfunction
+```

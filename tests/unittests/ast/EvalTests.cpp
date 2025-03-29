@@ -2540,14 +2540,15 @@ endfunction
     CHECK(session.eval("f3();").integer() == 139);
 
     auto diags = session.getDiagnostics();
-    REQUIRE(diags.size() == 7);
+    REQUIRE(diags.size() == 8);
     CHECK(diags[0].code == diag::ArithOpMismatch);
     CHECK(diags[1].code == diag::ConstEvalNoCaseItemsMatched);
     CHECK(diags[2].code == diag::ConstEvalCaseItemsNotUnique);
     CHECK(diags[3].code == diag::ConstantConversion);
     CHECK(diags[4].code == diag::ArithOpMismatch);
     CHECK(diags[5].code == diag::ArithOpMismatch);
-    CHECK(diags[6].code == diag::ArithOpMismatch);
+    CHECK(diags[6].code == diag::WidthExpand);
+    CHECK(diags[7].code == diag::ArithOpMismatch);
 }
 
 TEST_CASE("case statement eval regression") {
@@ -2607,4 +2608,28 @@ endmodule
 
     auto& compare = root.lookupName<ParameterSymbol>("m.Compare");
     CHECK(compare.getValue().integer() == 1);
+}
+
+TEST_CASE("Eval truthiness of strings") {
+    ScriptSession session;
+    session.eval(R"(
+function automatic bit b;
+    string s = "SDF";
+    if (s)
+        return 1;
+    return 0;
+endfunction
+)");
+
+    CHECK(session.eval("b()").integer() == 1);
+
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("Eval static cast type propagation") {
+    ScriptSession session;
+    CHECK(session.eval("(3)'(1'b1 << 2)").integer() == 4);
+    CHECK(session.eval("int'(1'b1 + (1'b1 << 2))").integer() == 5);
+
+    NO_SESSION_ERRORS;
 }

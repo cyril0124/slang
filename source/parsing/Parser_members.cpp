@@ -24,8 +24,9 @@ CompilationUnitSyntax& Parser::parseCompilationUnit() {
         return factory.compilationUnit(members, meta.eofToken);
     }
     SLANG_CATCH(const RecursionException&) {
-        return factory.compilationUnit(nullptr, meta.eofToken);
     }
+
+    return factory.compilationUnit(nullptr, meta.eofToken);
 }
 
 LibraryMapSyntax& Parser::parseLibraryMap() {
@@ -37,8 +38,9 @@ LibraryMapSyntax& Parser::parseLibraryMap() {
         return factory.libraryMap(members, meta.eofToken);
     }
     SLANG_CATCH(const RecursionException&) {
-        return factory.libraryMap(nullptr, meta.eofToken);
     }
+
+    return factory.libraryMap(nullptr, meta.eofToken);
 }
 
 MemberSyntax& Parser::parseModule() {
@@ -488,10 +490,7 @@ MemberSyntax& Parser::parseModportSubroutinePortList(AttrList attributes) {
     SmallVector<TokenOrSyntax, 8> buffer;
     while (true) {
         if (peek(TokenKind::FunctionKeyword) || peek(TokenKind::TaskKeyword)) {
-            auto& proto = parseFunctionPrototype(SyntaxKind::Unknown,
-                                                 FunctionOptions::AllowEmptyArgNames |
-                                                     FunctionOptions::IsPrototype);
-
+            auto& proto = parseFunctionPrototype(SyntaxKind::Unknown, FunctionOptions::IsPrototype);
             auto& msp = factory.modportSubroutinePort(proto);
             msp.previewNode = std::exchange(previewNode, nullptr);
             buffer.push_back(&msp);
@@ -642,7 +641,7 @@ FunctionPortBaseSyntax& Parser::parseFunctionPort(bitmask<FunctionOptions> optio
         dataType = &parseDataType();
 
     DeclaratorSyntax* decl;
-    if (!options.has(FunctionOptions::AllowEmptyArgNames) || peek(TokenKind::Identifier) ||
+    if (!options.has(FunctionOptions::IsPrototype) || peek(TokenKind::Identifier) ||
         peek(TokenKind::Equals)) {
         decl = &parseDeclarator();
     }
@@ -850,7 +849,8 @@ LoopGenerateSyntax& Parser::parseLoopGenerateConstruct(AttrList attributes) {
             iterVarCheck = iterationExpr->as<PostfixUnaryExpressionSyntax>().operand;
             break;
         default:
-            addDiag(diag::InvalidGenvarIterExpression, iterationExpr->sourceRange());
+            if (!iterationExpr->getFirstToken().isMissing())
+                addDiag(diag::InvalidGenvarIterExpression, iterationExpr->sourceRange());
             iterationExpr = &factory.badExpression(*iterationExpr);
             break;
     }
@@ -947,7 +947,8 @@ MemberSyntax& Parser::parseGenerateBlock() {
             // If there was some syntax error that caused parseMember to return null, fabricate an
             // empty member here and let our caller sort it out.
             auto loc = peek().location();
-            addDiag(diag::ExpectedMember, loc);
+            if (!haveDiagAtCurrentLoc())
+                addDiag(diag::ExpectedMember, loc);
             return factory.emptyMember(nullptr, nullptr, missingToken(TokenKind::Semicolon, loc));
         }
 
@@ -2381,10 +2382,8 @@ DPIImportSyntax& Parser::parseDPIImport(AttrList attributes) {
         equals = expect(TokenKind::Equals);
     }
 
-    auto& method = parseFunctionPrototype(SyntaxKind::Unknown,
-                                          FunctionOptions::AllowEmptyArgNames |
-                                              FunctionOptions::AllowImplicitReturn |
-                                              FunctionOptions::IsPrototype);
+    auto& method = parseFunctionPrototype(
+        SyntaxKind::Unknown, FunctionOptions::AllowImplicitReturn | FunctionOptions::IsPrototype);
 
     if (property.kind == TokenKind::PureKeyword && method.keyword.kind == TokenKind::TaskKeyword)
         addDiag(diag::DPIPureTask, method.keyword.range()) << property.range();

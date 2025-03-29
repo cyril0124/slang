@@ -120,6 +120,18 @@ const InstanceBodySymbol* Scope::getContainingInstance() const {
     return nullptr;
 }
 
+const Symbol* Scope::getContainingInstanceOrChecker() const {
+    auto currScope = this;
+    do {
+        auto& sym = currScope->asSymbol();
+        if (sym.kind == SymbolKind::InstanceBody || sym.kind == SymbolKind::CheckerInstanceBody)
+            return &sym;
+        currScope = sym.getParentScope();
+    } while (currScope);
+
+    return nullptr;
+}
+
 const CompilationUnitSymbol* Scope::getCompilationUnit() const {
     auto currScope = this;
     while (currScope && currScope->asSymbol().kind != SymbolKind::CompilationUnit)
@@ -139,12 +151,18 @@ bool Scope::isUninstantiated() const {
     auto currScope = this;
     do {
         auto& sym = currScope->asSymbol();
-        if (sym.kind == SymbolKind::InstanceBody)
-            return sym.as<InstanceBodySymbol>().flags.has(InstanceFlags::Uninstantiated);
-        if (sym.kind == SymbolKind::CheckerInstanceBody)
-            return sym.as<CheckerInstanceBodySymbol>().flags.has(InstanceFlags::Uninstantiated);
-        if (sym.kind == SymbolKind::GenerateBlock)
-            return sym.as<GenerateBlockSymbol>().isUninstantiated;
+        switch (sym.kind) {
+            case SymbolKind::InstanceBody:
+                return sym.as<InstanceBodySymbol>().flags.has(InstanceFlags::Uninstantiated);
+            case SymbolKind::CheckerInstanceBody:
+                return sym.as<CheckerInstanceBodySymbol>().flags.has(InstanceFlags::Uninstantiated);
+            case SymbolKind::GenerateBlock:
+                return sym.as<GenerateBlockSymbol>().isUninstantiated;
+            case SymbolKind::ClassType:
+                return sym.as<ClassType>().isUninstantiated;
+            default:
+                break;
+        }
         currScope = sym.getParentScope();
     } while (currScope);
 
@@ -263,6 +281,8 @@ void Scope::addMembers(const SyntaxNode& syntax) {
         case SyntaxKind::SpecifyBlock:
         case SyntaxKind::CoverCross:
         case SyntaxKind::NetAlias:
+        case SyntaxKind::BindDirective:
+        case SyntaxKind::ClockingDeclaration:
             addDeferredMembers(syntax);
             break;
         case SyntaxKind::EnumType:
@@ -275,11 +295,14 @@ void Scope::addMembers(const SyntaxNode& syntax) {
             break;
         case SyntaxKind::FunctionDeclaration:
         case SyntaxKind::TaskDeclaration: {
-            auto subroutine = SubroutineSymbol::fromSyntax(compilation,
-                                                           syntax.as<FunctionDeclarationSyntax>(),
-                                                           *this, /* outOfBlock */ false);
+            auto [subroutine, isExternIfaceMethod] = SubroutineSymbol::fromSyntax(
+                compilation, syntax.as<FunctionDeclarationSyntax>(), *this, /* outOfBlock */ false);
+
             if (subroutine)
                 addMember(*subroutine);
+
+            if (isExternIfaceMethod)
+                getOrAddDeferredData().isUncacheable = true;
             break;
         }
         case SyntaxKind::DataDeclaration: {
@@ -435,9 +458,6 @@ void Scope::addMembers(const SyntaxNode& syntax) {
         case SyntaxKind::DPIExport:
             compilation.noteDPIExportDirective(syntax.as<DPIExportSyntax>(), *this);
             break;
-        case SyntaxKind::BindDirective:
-            compilation.noteBindDirective(syntax.as<BindDirectiveSyntax>(), *this);
-            break;
         case SyntaxKind::ConstraintDeclaration:
             if (auto sym = ConstraintBlockSymbol::fromSyntax(
                     *this, syntax.as<ConstraintDeclarationSyntax>())) {
@@ -467,10 +487,6 @@ void Scope::addMembers(const SyntaxNode& syntax) {
             break;
         case SyntaxKind::PropertyDeclaration:
             addMember(PropertySymbol::fromSyntax(*this, syntax.as<PropertyDeclarationSyntax>()));
-            break;
-        case SyntaxKind::ClockingDeclaration:
-            addMember(
-                ClockingBlockSymbol::fromSyntax(*this, syntax.as<ClockingDeclarationSyntax>()));
             break;
         case SyntaxKind::LetDeclaration:
             addMember(LetDeclSymbol::fromSyntax(*this, syntax.as<LetDeclarationSyntax>()));
@@ -815,6 +831,9 @@ void Scope::elaborate() const {
     auto deferred = deferredData.getMembers();
     deferredMemberIndex = DeferredMemberIndex::Invalid;
 
+    if (deferredData.isUncacheable)
+        compilation.noteCannotCache(*this);
+
     // Enums need to be handled first because their value members may need
     // to be looked up by methods below.
     if (deferredData.hasEnums) {
@@ -883,7 +902,6 @@ void Scope::elaborate() const {
     // Go through deferred instances and elaborate them now.
     bool usedPorts = false;
     bool hasNestedDefs = false;
-    bool hasBinds = false;
     uint32_t constructIndex = 1;
 
     for (auto symbol : deferred) {
@@ -1053,11 +1071,6 @@ void Scope::elaborate() const {
                 insertMembersAndNets(members, implicitNets, symbol);
                 break;
             }
-            case SyntaxKind::BindDirective: {
-                // Process bind directives below after everything else.
-                hasBinds = true;
-                break;
-            }
             case SyntaxKind::ClassMethodDeclaration: {
                 auto subroutine = SubroutineSymbol::fromSyntax(
                     compilation, member.node.as<ClassMethodDeclarationSyntax>(), *this);
@@ -1067,6 +1080,14 @@ void Scope::elaborate() const {
             }
             case SyntaxKind::EnumType:
                 // Already handled above.
+                break;
+            case SyntaxKind::BindDirective:
+                compilation.noteBindDirective(member.node.as<BindDirectiveSyntax>(), *this);
+                break;
+            case SyntaxKind::ClockingDeclaration:
+                insertMember(&ClockingBlockSymbol::fromSyntax(
+                                 *this, member.node.as<ClockingDeclarationSyntax>()),
+                             symbol, true, true);
                 break;
             default:
                 SLANG_UNREACHABLE;
@@ -1122,7 +1143,7 @@ void Scope::elaborate() const {
 
     // If there are bind directives, reach up into the instance body
     // and pull out the extra bind metadata from its override node.
-    if (hasBinds) {
+    if (deferredData.hasBinds) {
         SmallSet<const BindDirectiveSyntax*, 4> seenBindDirectives;
         ASTContext context(*this, LookupLocation::max);
         auto handleBind = [&](const BindDirectiveInfo& info) {
@@ -1533,13 +1554,6 @@ static size_t countGenMembers(const SyntaxNode& syntax) {
     }
 }
 
-static size_t countBindMembers(const BindDirectiveSyntax& syntax) {
-    if (syntax.instantiation->kind == SyntaxKind::CheckerInstantiation)
-        return syntax.instantiation->as<CheckerInstantiationSyntax>().instances.size();
-    else
-        return syntax.instantiation->as<HierarchyInstantiationSyntax>().instances.size();
-}
-
 static size_t countMembers(const SyntaxNode& syntax) {
     // Note that the +1s on some of these are to make a slot for implicit
     // nets that get created to live.
@@ -1568,7 +1582,6 @@ static size_t countMembers(const SyntaxNode& syntax) {
         case SyntaxKind::CaseGenerate:
             return countGenMembers(syntax);
         case SyntaxKind::BindDirective:
-            return countBindMembers(syntax.as<BindDirectiveSyntax>()) + 1;
         case SyntaxKind::LoopGenerate:
         case SyntaxKind::GenerateBlock:
         case SyntaxKind::DefaultClockingReference:
@@ -1577,6 +1590,7 @@ static size_t countMembers(const SyntaxNode& syntax) {
         case SyntaxKind::ProgramDeclaration:
         case SyntaxKind::ClassMethodDeclaration:
         case SyntaxKind::EnumType:
+        case SyntaxKind::ClockingDeclaration:
             return 1;
         case SyntaxKind::SpecifyBlock:
         case SyntaxKind::CoverCross:

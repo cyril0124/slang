@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "slang/text/SourceLocation.h"
-#include "slang/util/Hash.h"
+#include "slang/util/FlatMap.h"
 #include "slang/util/SmallVector.h"
 #include "slang/util/Util.h"
 
@@ -222,6 +222,9 @@ public:
     /// @a addDiagnosticDirective and invalidate the span.
     std::span<const DiagnosticDirectiveInfo> getDiagnosticDirectives(BufferID buffer) const;
 
+    /// Clears all diagnostic directives registered with the sourcemanager.
+    void clearDiagnosticDirectives();
+
     /// Returns a list of buffers (files and macros) that have been created in the
     /// source manager.
     std::vector<BufferID> getAllBuffers() const;
@@ -259,7 +262,7 @@ private:
         FileData* data = nullptr;
         const SourceLibrary* library = nullptr;
         SourceLocation includedFrom;
-        uint64_t sortKey;
+        uint64_t sortKey = 0;
         std::vector<LineDirectiveInfo> lineDirectives;
 
         FileInfo() {}

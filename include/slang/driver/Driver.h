@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include "slang/ast/Compilation.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/driver/SourceLoader.h"
 #include "slang/text/SourceManager.h"
@@ -52,13 +53,17 @@ namespace slang::driver {
 /// if (!driver.parseCommandLine(someStr)) { ...error }
 /// if (!driver.processOptions()) { ...error }
 /// if (!driver.parseAllSources()) { ...error }
-///
-/// auto compilation = driver.createCompilation();
-/// if (!driver.reportCompilation(*compilation)) { ...error }
+/// if (!driver.runFullCompilation()) { ...error }
 /// else { ...success }
 /// @endcode
 ///
 class SLANG_EXPORT Driver {
+private:
+    // This exists to ensure we get a Compilation object created prior to anything else,
+    // such as the DiagnosticEngine, which wants a Compilation to register callbacks
+    // for printing symbol paths.
+    ast::Compilation defaultComp;
+
 public:
     /// The command line object that will be used to parse
     /// arguments if the @a parseCommandLine method is called.
@@ -112,6 +117,9 @@ public:
 
         /// A set of preprocessor directives to be ignored.
         std::vector<std::string> ignoreDirectives;
+
+        /// A set of options controlling translate-off comment directives.
+        std::vector<std::string> translateOffOptions;
 
         /// @}
         /// @name Parsing
@@ -213,6 +221,9 @@ public:
         /// If true, include macro expansion information in printed diagnostics.
         std::optional<bool> diagMacroExpansion;
 
+        /// If true, display absolute paths to files in printed diagnostics.
+        std::optional<bool> diagAbsPaths;
+
         /// One of the ShowHierarchyPathOption values that control whether to
         /// include hierarchy paths in printed diagnostics.
         std::optional<std::string> diagHierarchy;
@@ -237,6 +248,16 @@ public:
 
         /// A set of extensions that will be used to exclude files.
         flat_hash_set<std::string> excludeExts;
+
+        /// @}
+        /// @name Analysis
+        /// @{
+
+        /// Respect the unique and priority keywords in data flow analysis.
+        std::optional<bool> dfaUniquePriority;
+
+        /// Require case coverage to include X and Z bits in data flow analysis.
+        std::optional<bool> dfaFourState;
 
         /// @}
 
@@ -326,8 +347,26 @@ public:
     /// @brief Reports the result of compilation.
     ///
     /// If @a quiet is set to true, non-essential output will be suppressed.
+    void reportCompilation(ast::Compilation& compilation, bool quiet);
+
+    /// @brief Runs analysis on a compilation and reports the results.
+    ///
+    /// @note The compilation will be frozen after this call.
+    void runAnalysis(ast::Compilation& compilation);
+
+    /// @brief Reports all diagnostics to output.
+    ///
+    /// If @a quiet is set to true, non-essential output will be suppressed.
     /// @returns true if compilation succeeded and false if errors were encountered.
-    [[nodiscard]] bool reportCompilation(ast::Compilation& compilation, bool quiet);
+    [[nodiscard]] bool reportDiagnostics(bool quiet);
+
+    /// @brief Runs a full compilation pass and reports the results.
+    ///
+    /// This is a helper method that calls @a createCompilation, @a reportCompilation,
+    /// @a runAnalysis, and @a reportDiagnostics in sequence.
+    ///
+    /// @returns true if compilation succeeded and false if errors were encountered.
+    [[nodiscard]] bool runFullCompilation(bool quiet = false);
 
 private:
     bool parseUnitListing(std::string_view text);
@@ -340,6 +379,8 @@ private:
 
     bool anyFailedLoads = false;
     flat_hash_set<std::filesystem::path> activeCommandFiles;
+    std::vector<std::tuple<std::string_view, std::string_view, std::string_view>>
+        translateOffFormats;
     std::unique_ptr<JsonWriter> jsonWriter;
 };
 

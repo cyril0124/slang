@@ -59,6 +59,12 @@ add_library(
   ${CMAKE_CURRENT_BINARY_DIR}/TokenKind.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/VersionInfo.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/slang/diagnostics/AllDiags.h
+  analysis/AbstractFlowAnalysis.cpp
+  analysis/AnalysisManager.cpp
+  analysis/AnalyzedAssertion.cpp
+  analysis/AnalyzedProcedure.cpp
+  analysis/ClockInference.cpp
+  analysis/DataFlowAnalysis.cpp
   diagnostics/DiagnosticClient.cpp
   diagnostics/DiagnosticEngine.cpp
   diagnostics/Diagnostics.cpp
@@ -115,7 +121,7 @@ set_target_properties(
 
 # Compile options
 target_compile_options(slang_slang PRIVATE ${SLANG_WARN_FLAGS})
-target_compile_definitions(slang_slang PUBLIC $<$<CONFIG:Debug>:DEBUG>)
+target_compile_definitions(slang_slang PUBLIC $<$<CONFIG:Debug>:SLANG_DEBUG>)
 
 # Include directories
 target_include_directories(
@@ -135,6 +141,11 @@ target_link_libraries(slang_slang PUBLIC fmt::fmt Boost::headers
 if(SLANG_USE_MIMALLOC)
   target_link_libraries(slang_slang PUBLIC ${mimalloc_target})
   target_compile_definitions(slang_slang PUBLIC SLANG_USE_MIMALLOC)
+endif()
+
+if(SLANG_USE_CPPTRACE)
+  target_link_libraries(slang_slang PUBLIC cpptrace::cpptrace)
+  target_compile_definitions(slang_slang PUBLIC SLANG_USE_CPPTRACE)
 endif()
 
 # If building the Python library we'll end up with a shared lib no matter what,

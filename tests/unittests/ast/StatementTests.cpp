@@ -1245,7 +1245,7 @@ endmodule
     CHECK(diags[2].code == diag::TimingInFuncNotAllowed);
     CHECK(diags[3].code == diag::TaskFromFinal);
     CHECK(diags[4].code == diag::TimingInFuncNotAllowed);
-    CHECK(diags[5].code == diag::TimingInFuncNotAllowed);
+    CHECK(diags[5].code == diag::ConcurrentAssertNotInProc);
 }
 
 TEST_CASE("Non-blocking timing control reference to auto") {
@@ -1280,6 +1280,7 @@ module m;
         @cb i++;
         @(cb) i++;
         @(cb or posedge cb) i++;
+        @(cb iff i > 0) i++;
         @(cb.clk) i++;
     end
 endmodule
@@ -1289,8 +1290,9 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    REQUIRE(diags.size() == 1);
+    REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::ClockingBlockEventEdge);
+    CHECK(diags[1].code == diag::ClockingBlockEventIff);
 }
 
 TEST_CASE("Cycle delay errors") {
@@ -1312,6 +1314,27 @@ endmodule
     REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::ExprMustBeIntegral);
     CHECK(diags[1].code == diag::NoDefaultClocking);
+}
+
+TEST_CASE("Cycle delay in interface") {
+    auto tree = SyntaxTree::fromText(R"(
+interface intf(
+    input clk
+);
+
+    default clocking cb @(posedge clk);
+    endclocking
+
+    task zeroDelay();
+        ##0;
+    endtask
+
+endinterface
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
 }
 
 TEST_CASE("Synchronous drives") {
@@ -1751,7 +1774,7 @@ module m;
     end
 
     initial begin
-        e = instr matches tagged Jmp tagged JmpC '{cc:.c,addr:.a} &&& foo > 1 ? a + 10'(c) : 0;
+        e = instr matches tagged Jmp tagged JmpC '{cc:.c,addr:.a} &&& foo > 1 ? 32'(a + 10'(c)) : 0;
     end
 endmodule
 )");
@@ -2027,4 +2050,41 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Procedural checker statement restrictions") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    checker c;
+    endchecker
+
+    function foo;
+        c c1();
+    endfunction
+
+    initial begin
+        fork
+            c c1();
+        join
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::CheckerNotInProc);
+    CHECK(diags[1].code == diag::CheckerInForkJoin);
+}
+
+TEST_CASE("Conditional statement with pattern and explicit block crash regress") {
+    auto tree = SyntaxTree::fromText(R"(
+always begin union instr:if(instr matches begin c T i:
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    compilation.getAllDiagnostics();
 }

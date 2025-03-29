@@ -226,9 +226,9 @@ void registerSymbols(py::module_& m) {
         .def_property_readonly("isUnidirectionalPort", &ValueDriver::isUnidirectionalPort)
         .def_property_readonly("isClockVar", &ValueDriver::isClockVar)
         .def_property_readonly("isLocalVarFormalArg", &ValueDriver::isLocalVarFormalArg)
-        .def_property_readonly("isInSingleDriverProcedure", &ValueDriver::isInSingleDriverProcedure)
-        .def_property_readonly("isInSubroutine", &ValueDriver::isInSubroutine)
-        .def_property_readonly("isInInitialBlock", &ValueDriver::isInInitialBlock);
+        .def_property_readonly("isInProcedure", &ValueDriver::isInProcedure)
+        .def_property_readonly("isInSingleDriverProcedure",
+                               &ValueDriver::isInSingleDriverProcedure);
 
     py::class_<EnumValueSymbol, ValueSymbol>(m, "EnumValueSymbol")
         .def_property_readonly("value",
@@ -413,6 +413,8 @@ void registerSymbols(py::module_& m) {
         .def_property_readonly("isInterface", &InstanceSymbol::isInterface)
         .def_property_readonly("portConnections", &InstanceSymbol::getPortConnections)
         .def_property_readonly("body", [](const InstanceSymbol& self) { return &self.body; })
+        .def_property_readonly("canonicalBody",
+                               [](const InstanceSymbol& self) { return self.getCanonicalBody(); })
         .def("getPortConnection",
              py::overload_cast<const PortSymbol&>(&InstanceSymbol::getPortConnection, py::const_),
              byrefint, "port"_a)
