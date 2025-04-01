@@ -255,7 +255,7 @@ public:
     /// @param flags additional flags that control how the option behaves
     /// @note only one variable or callback be set to receive positional arguments
     void setPositional(std::vector<std::string>& values, std::string_view valueName,
-                       bitmask<CommandLineFlags> flags = {});
+                       bitmask<CommandLineFlags> flags = {}, bool allowOverWrite = false);
 
     /// Set a callback that will receive any positional arguments provided
     /// on the command line.
@@ -265,7 +265,7 @@ public:
     /// @param flags additional flags that control how the option behaves
     /// @note only one variable or callback be set to receive positional arguments
     void setPositional(const OptionCallback& cb, std::string_view valueName,
-                       bitmask<CommandLineFlags> flags = {});
+                       bitmask<CommandLineFlags> flags = {}, bool allowOverWrite = false);
 
     /// Adds a command that will be ignored if encountered during argument parsing.
     ///

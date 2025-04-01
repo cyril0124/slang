@@ -138,8 +138,8 @@ void CommandLine::addInternal(std::string_view name, OptionStorage storage, std:
 }
 
 void CommandLine::setPositional(std::vector<std::string>& values, std::string_view valueName,
-                                bitmask<CommandLineFlags> flags) {
-    if (positional)
+                                bitmask<CommandLineFlags> flags, bool allowOverWrite) {
+    if (positional && !allowOverWrite)
         SLANG_THROW(std::runtime_error("Can only set one positional argument"));
 
     positional = std::make_shared<Option>();
@@ -149,8 +149,8 @@ void CommandLine::setPositional(std::vector<std::string>& values, std::string_vi
 }
 
 void CommandLine::setPositional(const OptionCallback& cb, std::string_view valueName,
-                                bitmask<CommandLineFlags> flags) {
-    if (positional)
+                                bitmask<CommandLineFlags> flags, bool allowOverWrite) {
+    if (positional && !allowOverWrite)
         SLANG_THROW(std::runtime_error("Can only set one positional argument"));
 
     positional = std::make_shared<Option>();
