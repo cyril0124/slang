@@ -141,11 +141,6 @@ std::string SyntaxPrinter::printFile(const SyntaxTree& tree) {
 }
 
 SyntaxPrinter& SyntaxPrinter::append(std::string_view text, std::optional<slang::parsing::TokenKind> kind) {
-    std::string kindStr = "Unknown";
-    if(kind != std::nullopt) {
-        kindStr = toString(*kind);
-    }
-
     if(kind == TokenKind::Directive && text == "`__LINE__") {
         getLineDirective = true;
         lineDirectiveIdx = tokenIdx;
@@ -157,6 +152,19 @@ SyntaxPrinter& SyntaxPrinter::append(std::string_view text, std::optional<slang:
             return *this;
         }
         getLineDirective = false;
+    }
+
+    if(kind == TokenKind::Directive && text == "`__FILE__") {
+        getFileDirective = true;
+        fileDirectiveIdx = tokenIdx;
+    }
+
+    if (kind == TokenKind::StringLiteral) {
+        if(getFileDirective && fileDirectiveIdx == (tokenIdx - 1)) {
+            fflush(stdout);
+            return *this;
+        }
+        getFileDirective = false;
     }
 
     if (!squashNewlines) {
