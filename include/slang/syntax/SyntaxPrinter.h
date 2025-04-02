@@ -116,7 +116,9 @@ private:
     bool includeComments = true;
     bool squashNewlines = true;
     bool getLineDirective = false;
+    bool getFileDirective = false;
     uint64_t lineDirectiveIdx = 0;
+    uint64_t fileDirectiveIdx = 0;
     uint64_t tokenIdx = 0;
 };
 
