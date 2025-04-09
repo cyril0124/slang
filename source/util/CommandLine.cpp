@@ -125,8 +125,12 @@ void CommandLine::addInternal(std::string_view name, OptionStorage storage, std:
         }
 
         if (!optionMap.try_emplace(std::string(curr), option).second) {
-            SLANG_THROW(
-                std::invalid_argument(fmt::format("Argument with name '{}' already exists", curr)));
+            // SLANG_THROW(
+            //     std::invalid_argument(fmt::format("Argument with name '{}' already exists", curr)));
+
+            // Allow duplicate commandlines
+            fmt::println("[slang::CommandLine::addInternal] \033[33mwarning\033[0m: Argument with name '{}' already exists. Overwriting previous option.", curr);
+            optionMap[std::string(curr)] = option;
         }
 
         if (index == std::string_view::npos)
